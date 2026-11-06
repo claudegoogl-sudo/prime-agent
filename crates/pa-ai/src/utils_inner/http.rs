@@ -12,6 +12,11 @@ use crate::utils::stream_failure::{
     ProviderHttpError,
 };
 
+// PLATFORM-PATCH 2: bound connect and per-read idle time so a stalled provider
+// cannot hang a turn for hours (headers may legitimately take minutes).
+pub(crate) const PLATFORM_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+pub(crate) const PLATFORM_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static H2_ALPN_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
@@ -22,6 +27,8 @@ fn client() -> &'static reqwest::Client {
         crate::utils_inner::tls::http_client_builder()
             .http1_only()
             .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .connect_timeout(PLATFORM_CONNECT_TIMEOUT)
+            .read_timeout(PLATFORM_READ_TIMEOUT)
             .build()
             .expect("reqwest client")
     })
@@ -33,6 +40,8 @@ fn h2_alpn_client() -> &'static reqwest::Client {
     H2_ALPN_CLIENT.get_or_init(|| {
         crate::utils_inner::tls::http_client_builder()
             .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .connect_timeout(PLATFORM_CONNECT_TIMEOUT)
+            .read_timeout(PLATFORM_READ_TIMEOUT)
             .build()
             .expect("reqwest h2 client")
     })
@@ -431,5 +440,30 @@ mod tests {
             text.push_str(&chunk);
         }
         assert_eq!(text, "cut \u{FFFD}");
+    }
+}
+
+#[cfg(test)]
+mod platform_patch_2_tests {
+    use super::*;
+
+    // PLATFORM-PATCH 2: a server that accepts and never answers must fail within the read timeout.
+    #[tokio::test]
+    async fn platform_patch_2_read_timeout_is_set_and_bounded() {
+        assert_eq!(PLATFORM_CONNECT_TIMEOUT.as_secs(), 30);
+        assert_eq!(PLATFORM_READ_TIMEOUT.as_secs(), 600);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let _keep = listener.accept();
+            std::thread::sleep(std::time::Duration::from_secs(5));
+        });
+        let c = crate::utils_inner::tls::http_client_builder()
+            .http1_only()
+            .read_timeout(std::time::Duration::from_millis(300))
+            .build()
+            .unwrap();
+        let err = c.get(format!("http://{addr}/")).send().await.unwrap_err();
+        assert!(err.is_timeout(), "{err}");
     }
 }
