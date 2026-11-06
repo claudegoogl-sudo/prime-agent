@@ -9,6 +9,10 @@ use crate::paths::hash_key;
 /// Default directory holding daemon socket files (Unix).
 #[cfg(unix)]
 pub fn socket_dir() -> PathBuf {
+    // PLATFORM-PATCH 10: pinned socket dir, immune to an inherited TMPDIR.
+    if let Some(pinned) = std::env::var_os("PRIME_AGENT_PLATFORM_SOCKET_DIR").filter(|v| !v.is_empty()) {
+        return PathBuf::from(pinned);
+    }
     let uid = pa_core::platform::process::current_user_id();
     let tmp = std::env::var_os("TMPDIR").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
     socket_dir_for(&tmp, uid)
@@ -160,5 +164,20 @@ mod tests {
             rendered.ends_with("-0123456789ab"),
             "the 12-char id suffix: {rendered}"
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod platform_patch_10_tests {
+    use super::*;
+
+    // Single test: env is process-global, so keep all cases in one fn.
+    #[test]
+    fn pinned_socket_dir_ignores_tmpdir() {
+        std::env::set_var("TMPDIR", "/var/tmp/other-run");
+        std::env::set_var("PRIME_AGENT_PLATFORM_SOCKET_DIR", "/tmp/pa-pinned-test");
+        assert_eq!(socket_dir(), PathBuf::from("/tmp/pa-pinned-test"));
+        std::env::remove_var("PRIME_AGENT_PLATFORM_SOCKET_DIR");
+        assert!(socket_dir().starts_with("/var/tmp/other-run"));
     }
 }
