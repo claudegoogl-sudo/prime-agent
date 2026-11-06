@@ -7,3 +7,5 @@ Find every patch: `grep -rn "PLATFORM-PATCH" crates packaging`.
 |---|---|---|---|
 | 1 | wrapper pins registry dir + daemon socket | packaging/platform/prime-agent-wrapper.sh | copy file; set PA_ROOT |
 | 10 | socket dir pin, ignores TMPDIR | crates/pa-daemon/src/platform/paths.rs `socket_dir()` | grep `PLATFORM-PATCH 10`; env `PRIME_AGENT_PLATFORM_SOCKET_DIR` |
+| 4/5 | shared secret-env filter (denylist + `*_SECRET/_TOKEN/_KEY/_PAT` minus allowlist) | crates/pa-types/src/daemon/launch_env.rs `platform_env_blocked`; used in `collect_launch_env` and crates/pa-core/.../startup.rs `kernel_spawn_env` | grep `PLATFORM-PATCH 4/5` |
+| 6 | shared daemon strips run identity from its own env | crates/pa-daemon/src/main.rs supervisor arm | grep `PLATFORM-PATCH 6` |

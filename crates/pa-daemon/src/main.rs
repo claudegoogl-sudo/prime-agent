@@ -17,6 +17,8 @@ async fn main() -> Result<()> {
     });
     match command.as_str() {
         "supervisor" => {
+            // PLATFORM-PATCH 6: the shared daemon must not carry run identity.
+            pa_types::daemon::launch_env::platform_strip_run_identity_from_process();
             let mut socket_path = None;
             let mut agent_dir = None;
             let mut args = args.peekable();
