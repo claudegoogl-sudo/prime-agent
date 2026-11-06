@@ -39,7 +39,56 @@ pub fn collect_launch_env(
     source
         .into_iter()
         .filter(|(key, _)| !key.starts_with(INTERNAL_ENV_PREFIX))
+        .filter(|(key, _)| !platform_env_blocked(key))
         .collect()
+}
+
+// PLATFORM-PATCH 4/5: ONE shared filter for secret env names. Used by the
+// launch env (client + daemon re-apply) and the kernel spawn env.
+/// Signing/server secrets that must never reach a worker or kernel.
+pub const PLATFORM_ENV_DENYLIST: &[&str] = &[
+    "PAPERCLIP_AGENT_JWT_SECRET",
+    "BETTER_AUTH_SECRET",
+    "BETTER_AUTH_URL_SECRET",
+    "DATABASE_URL",
+    "PAPERCLIP_SECRETS_MASTER_KEY",
+];
+/// Names that match the secret pattern but a worker legitimately needs.
+pub const PLATFORM_ENV_ALLOWLIST: &[&str] = &[
+    "PAPERCLIP_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+];
+/// Run identity that the shared daemon process must not carry (item 6).
+pub const PLATFORM_RUN_IDENTITY: &[&str] = &[
+    "PAPERCLIP_RUN_ID",
+    "PAPERCLIP_API_KEY",
+    "PAPERCLIP_AGENT_ID",
+    "PAPERCLIP_TASK_ID",
+];
+
+/// True when `key` is a signing secret: denylisted, or matching
+/// `*_SECRET|*_TOKEN|*_KEY|*_PAT` and not allowlisted.
+#[must_use]
+pub fn platform_env_blocked(key: &str) -> bool {
+    if PLATFORM_ENV_DENYLIST.contains(&key) {
+        return true;
+    }
+    if PLATFORM_ENV_ALLOWLIST.contains(&key) {
+        return false;
+    }
+    ["_SECRET", "_TOKEN", "_KEY", "_PAT"]
+        .iter()
+        .any(|suffix| key.ends_with(suffix))
+}
+
+/// Remove run identity from the daemon's own process env (item 6).
+pub fn platform_strip_run_identity_from_process() {
+    for name in PLATFORM_RUN_IDENTITY {
+        std::env::remove_var(name);
+    }
 }
 
 /// Collect the launch env from THIS process's environment. Entries that
@@ -87,5 +136,18 @@ mod tests {
                 ("PA_MARKER".to_string(), "a-1".to_string()),
             ])
         );
+    }
+
+    #[test]
+    fn platform_patch_5_blocks_signing_secrets_and_keeps_allowlist() {
+        let env = collect_launch_env([
+            ("PAPERCLIP_AGENT_JWT_SECRET".to_string(), "x".to_string()),
+            ("MY_SERVICE_TOKEN".to_string(), "x".to_string()),
+            ("PAPERCLIP_API_KEY".to_string(), "x".to_string()),
+            ("AUTHOR".to_string(), "x".to_string()),
+            ("PATH".to_string(), "/usr/bin".to_string()),
+        ]);
+        let keys: Vec<_> = env.keys().cloned().collect();
+        assert_eq!(keys, vec!["AUTHOR", "PAPERCLIP_API_KEY", "PATH"]);
     }
 }

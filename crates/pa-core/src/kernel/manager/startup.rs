@@ -530,7 +530,10 @@ impl Inner {
 /// provisioner-provided `PYTHONUTF8`) and the owner pid the runtime journals
 /// its process groups under.
 fn kernel_spawn_env(options_env: &HashMap<String, String>) -> HashMap<String, String> {
-    let mut env: HashMap<String, String> = std::env::vars().collect();
+    // PLATFORM-PATCH 5: drop signing secrets inherited from the process env.
+    let mut env: HashMap<String, String> = std::env::vars()
+        .filter(|(key, _)| !pa_types::daemon::launch_env::platform_env_blocked(key))
+        .collect();
     for (key, value) in options_env {
         env.insert(key.clone(), value.clone());
     }
