@@ -48,11 +48,15 @@ pub fn collect_launch_env(
 /// Signing/server secrets that must never reach a worker or kernel.
 pub const PLATFORM_ENV_DENYLIST: &[&str] = &[
     "PAPERCLIP_AGENT_JWT_SECRET",
-    "BETTER_AUTH_SECRET",
-    "BETTER_AUTH_URL_SECRET",
-    "DATABASE_URL",
     "PAPERCLIP_SECRETS_MASTER_KEY",
+    "DATABASE_URL",
+    "PGPASSWORD",
+    "AWS_SESSION_TOKEN",
+    "NPM_TOKEN",
 ];
+/// Blocked by prefix (case-insensitive).
+pub const PLATFORM_ENV_DENY_PREFIXES: &[&str] =
+    &["PAPERCLIP_AGENT_JWT_", "PAPERCLIP_SECRETS_", "BETTER_AUTH_"];
 /// Names that match the secret pattern but a worker legitimately needs.
 pub const PLATFORM_ENV_ALLOWLIST: &[&str] = &[
     "PAPERCLIP_API_KEY",
@@ -73,18 +77,34 @@ pub const PLATFORM_RUN_IDENTITY: &[&str] = &[
 /// `*_SECRET|*_TOKEN|*_KEY|*_PAT` and not allowlisted.
 #[must_use]
 pub fn platform_env_blocked(key: &str) -> bool {
-    if PLATFORM_ENV_DENYLIST.contains(&key) {
+    let upper = key.to_ascii_uppercase();
+    if PLATFORM_ENV_DENYLIST.contains(&upper.as_str())
+        || upper.ends_with("_DATABASE_URL")
+        || PLATFORM_ENV_DENY_PREFIXES
+            .iter()
+            .any(|prefix| upper.starts_with(prefix))
+    {
         return true;
     }
-    if PLATFORM_ENV_ALLOWLIST.contains(&key) {
+    if PLATFORM_ENV_ALLOWLIST.contains(&upper.as_str()) {
         return false;
     }
-    ["_SECRET", "_TOKEN", "_KEY", "_PAT"]
-        .iter()
-        .any(|suffix| key.ends_with(suffix))
+    [
+        "_SECRET",
+        "_TOKEN",
+        "_KEY",
+        "_PAT",
+        "_PASSWORD",
+        "_PASSWD",
+        "_CREDENTIALS",
+        "_APIKEY",
+    ]
+    .iter()
+    .any(|suffix| upper.ends_with(suffix))
 }
 
-/// Remove run identity from the daemon's own process env (item 6).
+/// Remove run identity from the daemon's own process env (item 6). Call
+/// ONLY while the process is single-threaded (before any runtime starts).
 pub fn platform_strip_run_identity_from_process() {
     for name in PLATFORM_RUN_IDENTITY {
         std::env::remove_var(name);
@@ -149,5 +169,40 @@ mod tests {
         ]);
         let keys: Vec<_> = env.keys().cloned().collect();
         assert_eq!(keys, vec!["AUTHOR", "PAPERCLIP_API_KEY", "PATH"]);
+    }
+
+    #[test]
+    fn platform_patch_5_is_case_insensitive_and_covers_more_names() {
+        for k in [
+            "db_password",
+            "Aws_Session_Token",
+            "PGPASSWORD",
+            "NPM_TOKEN",
+            "X_CREDENTIALS",
+            "FOO_APIKEY",
+            "BETTER_AUTH_URL",
+            "paperclip_agent_jwt_secret",
+            "PAPERCLIP_SECRETS_FILE",
+            "READ_DATABASE_URL",
+            "SVC_SECRET_KEY",
+        ] {
+            assert!(platform_env_blocked(k), "{k} should be blocked");
+        }
+        for k in ["AUTHOR", "KEYBOARD", "PATH", "PAPERCLIP_API_URL", "paperclip_api_key"] {
+            assert!(!platform_env_blocked(k), "{k} should pass");
+        }
+    }
+
+    // PLATFORM-PATCH 6 test, incl. a second run (idempotent).
+    #[test]
+    fn platform_patch_6_strips_run_identity_twice() {
+        for _ in 0..2 {
+            std::env::set_var("PAPERCLIP_RUN_ID", "r");
+            std::env::set_var("PAPERCLIP_TASK_ID", "t");
+            platform_strip_run_identity_from_process();
+            assert!(std::env::var("PAPERCLIP_RUN_ID").is_err());
+            assert!(std::env::var("PAPERCLIP_TASK_ID").is_err());
+            platform_strip_run_identity_from_process();
+        }
     }
 }

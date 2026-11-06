@@ -582,6 +582,18 @@ mod tests {
         );
     }
 
+    // PLATFORM-PATCH 5 test: signing secrets in the process env never reach the kernel.
+    #[test]
+    fn platform_patch_5_kernel_env_drops_signing_secret() {
+        std::env::set_var("PAPERCLIP_AGENT_JWT_SECRET", "x");
+        std::env::set_var("PA_PLATFORM_TEST_KEEP", "y");
+        let env = kernel_spawn_env(&HashMap::new());
+        std::env::remove_var("PAPERCLIP_AGENT_JWT_SECRET");
+        std::env::remove_var("PA_PLATFORM_TEST_KEEP");
+        assert!(!env.contains_key("PAPERCLIP_AGENT_JWT_SECRET"));
+        assert!(env.contains_key("PA_PLATFORM_TEST_KEEP"));
+    }
+
     #[test]
     fn kernel_stderr_log_is_owner_only() {
         let root = temp_root("create");

@@ -4,8 +4,19 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+// PLATFORM-PATCH 6: strip run identity from the shared daemon's env BEFORE the
+// async runtime starts (env mutation is only safe while single-threaded).
+fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("supervisor") {
+        pa_types::daemon::launch_env::platform_strip_run_identity_from_process();
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async_main())
+}
+
+async fn async_main() -> Result<()> {
     // Same allocator cap as the prime-agent binary: large transient phases
     // (session loads, attach snapshots) must not leave per-arena high-water
     // pages resident.
@@ -17,8 +28,6 @@ async fn main() -> Result<()> {
     });
     match command.as_str() {
         "supervisor" => {
-            // PLATFORM-PATCH 6: the shared daemon must not carry run identity.
-            pa_types::daemon::launch_env::platform_strip_run_identity_from_process();
             let mut socket_path = None;
             let mut agent_dir = None;
             let mut args = args.peekable();
