@@ -335,6 +335,28 @@ pub fn session_header_line(header: &SessionHeader) -> Value {
 fn write_line<T: Serialize>(writer: &mut impl Write, value: &T) -> Result<()> {
     let mut line = serde_json::to_string(value)?;
     line.push('\n');
-    writer.write_all(line.as_bytes())?;
+    // PLATFORM-PATCH 7: every transcript line is redacted here (append, rewrite, header).
+    writer.write_all(&pa_types::redact::redact_json_line(line.as_bytes()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod platform_patch_7_tests {
+    use super::write_line;
+
+    // PLATFORM-PATCH 7: a secret in a transcript record never reaches the written bytes.
+    #[test]
+    fn write_line_redacts_secret_values() {
+        let secret = "transcript-secret-VALUE-9911";
+        pa_types::redact::reload(
+            [("TRANSCRIPT_TEST_TOKEN".to_string(), secret.to_string())],
+            None,
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        write_line(&mut out, &serde_json::json!({"type":"message","text":format!("see {secret}")})).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(!s.contains(secret));
+        assert!(s.contains("[REDACTED:TRANSCRIPT_TEST_TOKEN]"));
+    }
 }
