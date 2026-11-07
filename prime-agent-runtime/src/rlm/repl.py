@@ -768,6 +768,38 @@ def _read_snapshot_records(fh: Any, max_bytes: int, max_variable_bytes: int) -> 
     return records
 
 
+# PLATFORM-PATCH 9: snapshots must not persist secrets. Name rule is NARROW
+# (whole "_"-separated segments only: api_key, MY_TOKEN, password; never
+# "key", "author", "keyboard") and applies to str/bytes values; the value rule
+# drops any string containing a secret-looking env value (len >= 8).
+_PLATFORM_SECRET_SEGMENTS = {"secret", "token", "password", "passwd", "credential", "credentials", "apikey"}
+_PLATFORM_ENV_SUFFIXES = ("_SECRET", "_TOKEN", "_KEY", "_PAT", "_PASSWORD", "_PASSWD", "_CREDENTIALS", "_APIKEY")
+
+
+def _platform_secret_name(name: str) -> bool:
+    segs = name.lower().split("_")
+    if any(seg in _PLATFORM_SECRET_SEGMENTS for seg in segs):
+        return True
+    return any(a == "api" and b == "key" for a, b in zip(segs, segs[1:]))
+
+
+def _platform_env_secret_values() -> list[str]:
+    return [
+        v for k, v in os.environ.items() if len(v) >= 8 and k.upper().endswith(_PLATFORM_ENV_SUFFIXES)
+    ]
+
+
+def _platform_is_secret_var(name: str, value: Any, secret_values: list[str]) -> bool:
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("utf-8", "ignore")
+        except Exception:  # noqa: BLE001
+            return False
+    if not isinstance(value, str):
+        return False
+    return _platform_secret_name(name) or any(sv in value for sv in secret_values)
+
+
 def _snapshot_state(
     ns: dict[str, Any],
     path: str,
@@ -779,6 +811,7 @@ def _snapshot_state(
 ) -> dict[str, Any]:
     import datetime
 
+    platform_secret_values = _platform_env_secret_values()
     try:
         import dill
     except Exception as err:  # noqa: BLE001 - dill is provisioned by the host, not a hard dep
@@ -845,6 +878,9 @@ def _snapshot_state(
                         # v2 record header; skip it like any other unserializable
                         # name instead of failing the whole snapshot.
                         skipped.append({"name": name, "reason": f"{type(err).__name__}: {_safe_str(err)[:200]}"})
+                        continue
+                    if _platform_is_secret_var(name, value, platform_secret_values):
+                        skipped.append({"name": name, "reason": "secret variable"})
                         continue
                     # Record header: 4-byte name length + 8-byte blob length, plus the name itself.
                     budget = max_bytes - total - 12 - len(encoded)

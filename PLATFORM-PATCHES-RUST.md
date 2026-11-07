@@ -11,3 +11,5 @@ Find every patch: `grep -rn "PLATFORM-PATCH" crates packaging`.
 | 6 | shared daemon strips run identity from its own env | crates/pa-daemon/src/main.rs supervisor arm | grep `PLATFORM-PATCH 6` |
 | 2 | reqwest connect 30s + read 600s timeouts | crates/pa-ai/src/utils_inner/http.rs | grep `PLATFORM-PATCH 2` |
 | 12 | opt-in hard abort of a python cell at pythonCellTimeoutMs (set env PRIME_AGENT_PLATFORM_HARD_CELL_ABORT=1 and pythonCellTimeoutMs=3000000) | crates/pa-core/src/kernel/manager/mod.rs `execute` | grep `PLATFORM-PATCH 12` |
+| 8 | kernel-state files owner-only (0600): upstream already writes via mkstemp (0600); test pins it, no code change | prime-agent-runtime/test/test_platform_snapshot.py | run the test |
+| 9 | snapshot skips secret variables: narrow name segments (api_key, *_TOKEN, password...) on str/bytes + any string containing a secret-looking env value (len>=8) | prime-agent-runtime/src/rlm/repl.py `_platform_is_secret_var` | grep `PLATFORM-PATCH 9` |
