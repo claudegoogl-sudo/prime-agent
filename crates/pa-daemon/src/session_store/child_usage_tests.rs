@@ -684,3 +684,55 @@ fn admitted_confirmation_finishes_while_release_drains_and_later_writes_are_refu
     ));
     assert_eq!(attribution_rows(&reopened).len(), 1);
 }
+
+/// PLATFORM-PATCH 7 (R-A) e2e: a needle in every encoding, fed through the
+/// transcript message path, the rewrite path and the raw child-usage append
+/// path, never appears in any file under the session dir.
+#[test]
+fn needle_in_all_encodings_never_reaches_any_session_file() {
+    let secret = "e2e-needle-SECRET-Value/7731+x";
+    pa_types::redact::reload(
+        [("E2E_NEEDLE_TOKEN".to_string(), secret.to_string())],
+        None,
+    )
+    .unwrap();
+    let variants = pa_types::redact::variants(secret);
+    assert!(variants.len() > 8);
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = SessionFile::create("/synthetic", None, 0);
+    let mut target = String::new();
+    for v in &variants {
+        let text = String::from_utf8_lossy(v).into_owned();
+        target = store.append_message(&json!({
+            "role": "assistant", "content": [{"type":"text","text":text}],
+            "api": "openai-completions", "provider": "synthetic",
+            "model": "synthetic", "stopReason": "stop", "timestamp": 1,
+            "usage": Usage::default()
+        }));
+    }
+    store.set_path(dir.path().join("session.jsonl"));
+    store.rewrite().unwrap();
+    for (i, v) in variants.iter().enumerate() {
+        let id = format!("row-{i}-{}", String::from_utf8_lossy(v));
+        store
+            .append_child_usage_once(&id, &target, child(), None)
+            .unwrap();
+        // retry converges on the same (redacted) row
+        let again = store
+            .append_child_usage_once(&id, &target, child(), None)
+            .unwrap();
+        assert!(matches!(again, ChildUsageAppendResult::Existing(_)));
+    }
+    let mut checked = 0;
+    for entry in std::fs::read_dir(dir.path()).unwrap() {
+        let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+        for v in &variants {
+            assert!(
+                !bytes.windows(v.len()).any(|w| w == v.as_slice()),
+                "needle variant leaked"
+            );
+        }
+        checked += 1;
+    }
+    assert!(checked >= 1);
+}

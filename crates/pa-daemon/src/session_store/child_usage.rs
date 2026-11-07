@@ -97,6 +97,15 @@ impl SessionFile {
         origin: Option<ChildUsageOrigin>,
     ) -> Result<ChildUsageAppendResult> {
         ensure!(!row_id.is_empty(), "attribution ID must not be empty");
+        // PLATFORM-PATCH 7 (R-A): the row id is the only caller text in this
+        // row; it is written by raw byte append (not write_line), so redact it
+        // here. Redaction is deterministic, so retries still find their row.
+        let row_id = pa_types::redact::redact_text(row_id);
+        ensure!(
+            row_id != "[REDACTED:ERROR]",
+            "attribution row id redaction unavailable"
+        );
+        let row_id = row_id.as_str();
         self.confirm_child_usage_write()?;
         if let Some(entry) = self.entry(row_id) {
             ensure!(
