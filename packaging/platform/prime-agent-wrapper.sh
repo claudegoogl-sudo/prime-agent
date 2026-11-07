@@ -8,4 +8,10 @@ mkdir -p "$PA_ROOT/supervisor" "$PA_ROOT/sock"
 chmod 700 "$PA_ROOT/supervisor" "$PA_ROOT/sock"
 export PRIME_AGENT_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR="$PA_ROOT/supervisor"
 export PRIME_AGENT_PLATFORM_SOCKET_DIR="$PA_ROOT/sock"
-exec "${PA_BIN:-$PA_ROOT/bin/prime-agent}" --daemon-socket "$PA_ROOT/sock/daemon.sock" "$@"
+# Subcommands (status, list, ...) reject --daemon-socket; pin it only for run/print modes.
+case "${1:-}" in
+  help|agents|list|sessions|attach|stop|rename|send|schedule|status|telemetry|doctor|incident|shutdown|mcp|package|update|model|session|config)
+    exec "${PA_BIN:-$PA_ROOT/bin/prime-agent}" "$@" ;;
+  *)
+    exec "${PA_BIN:-$PA_ROOT/bin/prime-agent}" --daemon-socket "$PA_ROOT/sock/daemon.sock" "$@" ;;
+esac

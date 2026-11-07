@@ -14,3 +14,15 @@ Find every patch: `grep -rn "PLATFORM-PATCH" crates packaging`.
 | 8 | kernel-state files owner-only (0600): upstream already writes via mkstemp (0600); test pins it, no code change | prime-agent-runtime/test/test_platform_snapshot.py | run the test |
 | 9 | snapshot skips secret variables: narrow name segments (api_key, *_TOKEN, password...) on str/bytes + any string containing a secret-looking env value (len>=8) | prime-agent-runtime/src/rlm/repl.py `_platform_is_secret_var` | grep `PLATFORM-PATCH 9` |
 | 7 (part) | value-based redaction matcher: encodings, leftmost-longest, stream tail; design in docs/PLATFORM-REDACTION-DESIGN.md | crates/pa-types/src/redact.rs | grep `PLATFORM-PATCH 7` |
+
+## Patch 16: claude-haiku-5-5 is missing from the bundled/remote catalog
+Finding (ops smoke, PLA-11947): the model catalog has `claude-haiku-4-5`, `claude-sonnet-5-5`, `claude-opus-5-5`, but no `claude-haiku-5-5` (only a Bedrock `-v1` id exists upstream). The provider code already knows `haiku-5` ids (adaptive thinking, `crates/pa-ai/src/providers/anthropic/mod.rs`), so only the catalog entry is missing.
+Smallest fix, no code change: a custom `models.json` in the agent dir (supported by `crates/pa-core/src/models/custom.rs`):
+```json
+{ "providers": { "anthropic": { "models": [
+  { "id": "claude-haiku-5-5", "name": "Claude Haiku 5.5", "api": "anthropic-messages",
+    "reasoning": true, "input": ["text", "image"],
+    "contextWindow": 200000, "maxTokens": 64000,
+    "cost": { "input": 1, "output": 5, "cacheRead": 0.1, "cacheWrite": 1.25 } } ] } } }
+```
+UNCONFIRMED values: contextWindow, maxTokens and cost are copied from the Haiku 4.5 row (the only Haiku data in the repo). Confirm the real Haiku 5.5 numbers before rollout; cost only affects usage reporting. `api` must match the other anthropic rows in the live catalog (check `prime-agent model list --json`).
