@@ -561,6 +561,10 @@ pub fn redact_text(text: &str) -> String {
     String::from_utf8_lossy(&redact_json_or_text(&r, text.as_bytes())).into_owned()
 }
 
+fn redact_text_structural(text: &str) -> String {
+    redact_text(text)
+}
+
 fn redact_json_or_text(r: &Redactor, b: &[u8]) -> Vec<u8> {
     if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(b) {
         if matches!(v, serde_json::Value::Object(_) | serde_json::Value::Array(_)) {
@@ -580,7 +584,49 @@ fn redact_json_or_text(r: &Redactor, b: &[u8]) -> Vec<u8> {
 #[macro_export]
 macro_rules! pa_println {
     () => {{ #[allow(clippy::disallowed_macros)] { println!() } }};
-    ($($t:tt)*) => {{ #[allow(clippy::disallowed_macros)] { println!("{}", $crate::redact::redact_text(&format!($($t)*))) } }};
+    ($($t:tt)*) => {{ $crate::redact::stdout_line(&format!($($t)*)) }};
+}
+
+static STDOUT_SINK: std::sync::Mutex<Option<StreamRedactor>> = std::sync::Mutex::new(None);
+
+/// Persistent stdout sink (R-F): one process-wide stream matcher, so a secret split across
+/// separate `pa_println!` calls is still caught. The last `max_needle_len-1` bytes are held back
+/// until more output arrives or [`flush_stdout`] runs (call it before process exit).
+/// Fail closed: with no matcher, only `[REDACTED:ERROR]` is written.
+pub fn stdout_line(text: &str) {
+    use std::io::Write as _;
+    let out = {
+        let mut g = STDOUT_SINK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if g.is_none() {
+            *g = stream();
+        }
+        match g.as_mut() {
+            Some(s) => {
+                let mut line = redact_text_structural(text).into_bytes();
+                line.push(b'\n');
+                s.push(&line)
+            }
+            None => b"[REDACTED:ERROR]\n".to_vec(),
+        }
+    };
+    let so = std::io::stdout();
+    let mut l = so.lock();
+    let _ = l.write_all(&out);
+}
+
+/// Release the held stdout tail (redacted). Call before process exit.
+pub fn flush_stdout() {
+    use std::io::Write as _;
+    let tail = STDOUT_SINK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take()
+        .map(StreamRedactor::finish)
+        .unwrap_or_default();
+    let so = std::io::stdout();
+    let mut l = so.lock();
+    let _ = l.write_all(&tail);
+    let _ = l.flush();
 }
 
 /// `eprintln!` through the redaction sink (stderr).
@@ -622,6 +668,16 @@ mod tests {
     fn serial() -> std::sync::MutexGuard<'static, ()> {
         static M: std::sync::Mutex<()> = std::sync::Mutex::new(());
         M.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    #[test]
+    fn stdout_sink_catches_secret_split_across_lines_calls() {
+        let r = std::sync::Arc::new(red());
+        let mut s = StreamRedactor::new(r);
+        let mut out = s.push(&SECRET.as_bytes()[..5]);
+        out.extend(s.push(&SECRET.as_bytes()[5..]));
+        out.extend(s.finish());
+        assert!(!String::from_utf8_lossy(&out).contains(SECRET));
     }
 
     fn red() -> Redactor {

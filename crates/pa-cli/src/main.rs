@@ -13,6 +13,7 @@ fn main() {
         pa_daemon::worker::strip_inherited_worker_env();
     }
     let code = pa_cli::main_with_runtime(&args, &pa_cli::PrintRuntime);
+    pa_types::redact::flush_stdout();
     // Restore the Windows VT bit before process exit.
     pa_types::platform::console_restore();
     std::process::exit(code);
