@@ -182,7 +182,9 @@ impl ExportCommands {
                 };
             }
             previous = value.get("id").and_then(Value::as_str).map(str::to_string);
-            lines.push(serde_json::to_string(&value)?);
+            let raw = format!("{}\n", serde_json::to_string(&value)?);
+            let safe = pa_types::redact::redact_json_line(raw.as_bytes());
+            lines.push(String::from_utf8_lossy(&safe).trim_end_matches('\n').to_string());
         }
         let body = format!("{}\n", lines.join("\n"));
         std::fs::write(&file_path, body)
