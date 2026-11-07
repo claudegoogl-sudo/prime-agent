@@ -128,7 +128,7 @@ pub fn repair_jsonl_damage(file_path: &Path) {
                 true
             };
             if keep {
-                output.write_all(String::from_utf8_lossy(content).as_bytes())?;
+                output.write_all(&pa_types::redact::redact_json_line(String::from_utf8_lossy(content).as_bytes()))?;
                 output.write_all(b"\n")?;
             }
             line.clear();

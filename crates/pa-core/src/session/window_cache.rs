@@ -208,6 +208,9 @@ pub fn append_cached(path: &Path, bytes: &[u8], ownership: AppendOwnership) -> i
     if file.metadata()?.len() > 0 && !file_tail_is_newline(path)? {
         file.write_all(b"\n")?;
     }
+    // F1: redact at the append chokepoint (fail closed).
+    let redacted = pa_types::redact::redact_json_lines(bytes);
+    let bytes: &[u8] = &redacted;
     file.write_all(bytes)?;
     file.flush()?;
     crate::platform::fsync(&file)?;

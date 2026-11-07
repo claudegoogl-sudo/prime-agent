@@ -462,3 +462,38 @@ fn replay_admitted_user_rows_stays_windowed_and_reuses_only_registered_ids() {
         "the worker-owned durable file is untouched by mirrored replay"
     );
 }
+
+/// F1: every session-file write path (rewrite, append) redacts all needle encodings.
+#[test]
+fn persisted_session_file_holds_no_needle_encoding() {
+    const SECRET: &str = "zq-Secret-AbC123xyz987-QQ";
+    pa_types::redact::reload(vec![("MYAPP_SECRET".to_string(), SECRET.to_string())], None).unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("sessions");
+    let mut manager = SessionManager::persisted(tmp.path(), &dir);
+    manager.append_thinking_level_change(SECRET);
+    manager
+        .append_message(AgentMessage::Assistant(pa_types::ai::AssistantMessage {
+            content: vec![],
+            api: "anthropic-messages".to_string(),
+            provider: "anthropic".to_string(),
+            model: SECRET.to_string(),
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+            usage: pa_types::ai::Usage::default(),
+            stop_reason: pa_types::ai::StopReason::Stop,
+            stop_reason_raw: None,
+            error_message: None,
+            timestamp: 0,
+            rest: serde_json::Map::default(),
+        }))
+        .unwrap();
+    manager.append_thinking_level_change(SECRET); // append path
+    let file = manager.get_session_file().unwrap().to_path_buf();
+    let bytes = std::fs::read(&file).unwrap();
+    for v in pa_types::redact::variants(SECRET) {
+        assert!(!bytes.windows(v.len()).any(|w| w == v.as_slice()), "needle in session file: {}", String::from_utf8_lossy(&bytes));
+    }
+    assert!(String::from_utf8_lossy(&bytes).contains("REDACTED"));
+}

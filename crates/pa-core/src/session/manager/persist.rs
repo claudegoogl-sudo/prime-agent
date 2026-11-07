@@ -156,7 +156,7 @@ pub(super) fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
         options.create(true).write(true).truncate(true);
         crate::platform::perms::set_private_mode(&mut options);
         let mut file = options.open(&temp)?;
-        file.write_all(content.as_bytes())?;
+        file.write_all(&pa_types::redact::redact_json_lines(content.as_bytes()))?;
         file.sync_all()?;
     }
     crate::platform::rename_onto(&temp, path)

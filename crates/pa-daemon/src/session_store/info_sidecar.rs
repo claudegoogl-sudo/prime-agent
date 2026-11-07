@@ -78,13 +78,12 @@ pub(crate) fn persist_info_sidecar(path: &Path) {
         // rename carries the mode onto the sidecar.
         pa_core::platform::perms::set_private_mode(&mut options);
         let mut file = io::BufWriter::new(options.open(&temp)?);
-        serde_json::to_writer(
-            &mut file,
-            &InfoSidecar {
-                version: INFO_SIDECAR_VERSION,
-                state,
-            },
-        )?;
+        // F1: first_message is prompt text; redact before it reaches disk (fail closed).
+        let raw = serde_json::to_vec(&InfoSidecar {
+            version: INFO_SIDECAR_VERSION,
+            state,
+        })?;
+        io::Write::write_all(&mut file, &pa_types::redact::redact_json_line(&raw))?;
         file.flush()?;
         pa_core::platform::rename_onto(&temp, &sidecar_path(path))
     })();

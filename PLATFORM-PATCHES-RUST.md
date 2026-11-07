@@ -27,3 +27,8 @@ Smallest fix, no code change: a custom `models.json` in the agent dir (supported
 ```
 UNCONFIRMED values: contextWindow, maxTokens and cost are copied from the Haiku 4.5 row (the only Haiku data in the repo). Confirm the real Haiku 5.5 numbers before rollout; cost only affects usage reporting. `api` must match the other anthropic rows in the live catalog (check `prime-agent model list --json`).
 | 13/14 | paperclip_api skill copied (re-reads auth from os.environ every call) + 2 unit tests | skills/paperclip-api/ | run `python -m unittest discover -s test` in that dir |
+
+## PLA-12069 fixups
+- F1: every session-file write (rewrite `atomic_write`, append `append_cached`, repair rewrite, info-cache sidecar) now goes through `pa_types::redact` (fail closed). Test: `session::manager::tests::persisted_session_file_holds_no_needle_encoding`.
+- F2: `PRIME_AGENT_PLATFORM_NEEDLES_FILE` empty/whitespace = unset. A bad file fails closed with a stderr line naming the path and reason.
+- F3 (install note): an old 0.9.3 TypeScript daemon can own `/tmp/prime-agent-<uid>/daemon.sock`. Starting the Rust CLI without the wrapper then times out ("Run: prime-agent shutdown --force"). Always start via the wrapper, which pins its own socket.

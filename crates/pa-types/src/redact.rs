@@ -462,7 +462,10 @@ pub fn reload(
 /// # Errors
 /// See [`reload`].
 pub fn reload_from_process_env() -> Result<(), String> {
-    let file = std::env::var_os("PRIME_AGENT_PLATFORM_NEEDLES_FILE").map(std::path::PathBuf::from);
+    // F2: empty/whitespace value means unset (must not blank all output).
+    let file = std::env::var_os("PRIME_AGENT_PLATFORM_NEEDLES_FILE")
+        .filter(|v| !v.to_string_lossy().trim().is_empty())
+        .map(std::path::PathBuf::from);
     reload(std::env::vars(), file.as_deref())
 }
 
@@ -484,9 +487,15 @@ fn retry_failed_reload() {
         return;
     }
     let file = global().read().ok().and_then(|g| g.last_file.clone());
-    let ok = reload(std::env::vars(), file.as_deref()).is_ok();
-    // Content-free: reload errors never carry secret values.
-    eprintln!("prime-agent: redaction is fail-closed; reload retry {}", if ok { "succeeded" } else { "failed" });
+    let res = reload(std::env::vars(), file.as_deref());
+    // Content-free: reload errors never carry secret values; name path + reason only.
+    match res {
+        Ok(()) => eprintln!("prime-agent: redaction is fail-closed; reload retry succeeded"),
+        Err(e) => eprintln!(
+            "prime-agent: redaction is fail-closed; reload retry failed (needles file: {}; reason: {e})",
+            file.as_deref().map_or("<none>".to_string(), |p| p.display().to_string())
+        ),
+    }
 }
 
 fn current() -> Option<Arc<Redactor>> {
@@ -656,6 +665,21 @@ pub fn redact_json_line(line: &[u8]) -> Vec<u8> {
         }
     }
     r.redact_structural(&bytes)
+}
+
+/// Multi-line variant of [`redact_json_line`]: each `\n`-separated record is redacted on its own
+/// (F1 chokepoint for session files, sidecars and repairs).
+#[must_use]
+pub fn redact_json_lines(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len());
+    for seg in data.split_inclusive(|b| *b == b'\n') {
+        if seg.iter().all(u8::is_ascii_whitespace) {
+            out.extend_from_slice(seg);
+        } else {
+            out.extend_from_slice(&redact_json_line(seg));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -921,5 +945,15 @@ mod tests {
         assert_eq!(read_needles_file(&f).unwrap_err(), "needles file parent dir is group/world-writable");
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
         assert!(read_needles_file(&f).is_ok());
+    }
+
+    #[test]
+    fn empty_needles_file_env_is_treated_as_unset() {
+        let _g = serial();
+        std::env::set_var("PRIME_AGENT_PLATFORM_NEEDLES_FILE", "  ");
+        let r = reload_from_process_env();
+        std::env::remove_var("PRIME_AGENT_PLATFORM_NEEDLES_FILE");
+        assert!(r.is_ok(), "empty env must not fail closed: {r:?}");
+        assert!(!is_failed_closed());
     }
 }
