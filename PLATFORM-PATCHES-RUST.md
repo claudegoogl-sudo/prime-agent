@@ -26,3 +26,4 @@ Smallest fix, no code change: a custom `models.json` in the agent dir (supported
     "cost": { "input": 1, "output": 5, "cacheRead": 0.1, "cacheWrite": 1.25 } } ] } } }
 ```
 UNCONFIRMED values: contextWindow, maxTokens and cost are copied from the Haiku 4.5 row (the only Haiku data in the repo). Confirm the real Haiku 5.5 numbers before rollout; cost only affects usage reporting. `api` must match the other anthropic rows in the live catalog (check `prime-agent model list --json`).
+| 13/14 | paperclip_api skill copied (re-reads auth from os.environ every call) + 2 unit tests | skills/paperclip-api/ | run `python -m unittest discover -s test` in that dir |
