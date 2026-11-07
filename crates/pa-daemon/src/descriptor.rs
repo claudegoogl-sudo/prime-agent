@@ -255,7 +255,9 @@ fn write_file_atomic_at(path: &Path, content: &str, sync: TempSync) -> Result<()
         let file =
             std::fs::File::create(&temp).with_context(|| format!("create {}", temp.display()))?;
         let mut writer = std::io::BufWriter::new(file);
-        writer.write_all(content.as_bytes())?;
+        // R-A: descriptors, rosters and passivation records are content-bearing; redact bytes
+        // before they reach disk (fail closed).
+        writer.write_all(&pa_types::redact::redact_json_line(content.as_bytes()))?;
         writer.flush()?;
         if matches!(sync, TempSync::Synced) {
             writer.get_ref().sync_all()?;
