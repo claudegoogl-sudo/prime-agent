@@ -13,6 +13,7 @@ pub mod goal;
 pub mod incident;
 pub mod memory_release;
 pub mod platform;
+pub mod redact;
 pub mod session;
 pub mod skill_blocks;
 pub mod slash_commands;

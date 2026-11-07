@@ -13,3 +13,4 @@ Find every patch: `grep -rn "PLATFORM-PATCH" crates packaging`.
 | 12 | opt-in hard abort of a python cell at pythonCellTimeoutMs (set env PRIME_AGENT_PLATFORM_HARD_CELL_ABORT=1 and pythonCellTimeoutMs=3000000) | crates/pa-core/src/kernel/manager/mod.rs `execute` | grep `PLATFORM-PATCH 12` |
 | 8 | kernel-state files owner-only (0600): upstream already writes via mkstemp (0600); test pins it, no code change | prime-agent-runtime/test/test_platform_snapshot.py | run the test |
 | 9 | snapshot skips secret variables: narrow name segments (api_key, *_TOKEN, password...) on str/bytes + any string containing a secret-looking env value (len>=8) | prime-agent-runtime/src/rlm/repl.py `_platform_is_secret_var` | grep `PLATFORM-PATCH 9` |
+| 7 (part) | value-based redaction matcher: encodings, leftmost-longest, stream tail; design in docs/PLATFORM-REDACTION-DESIGN.md | crates/pa-types/src/redact.rs | grep `PLATFORM-PATCH 7` |
