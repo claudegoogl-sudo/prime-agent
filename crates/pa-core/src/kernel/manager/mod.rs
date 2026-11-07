@@ -581,8 +581,12 @@ impl ReplKernelManager {
     ///
     /// Returns an error when the in-flight protocol repair fails or the enqueued execution fails.
     pub async fn execute(&self, code: &str, opts: ExecuteOptions) -> anyhow::Result<ExecuteResult> {
-        self.execute_bounded(code, opts, /*execution_timeout_ms*/ None)
-            .await
+        // PLATFORM-PATCH 12: opt-in hard abort at the existing cell budget.
+        let hard = platform_hard_cell_timeout(
+            opts.cell_timeout_ms,
+            std::env::var("PRIME_AGENT_PLATFORM_HARD_CELL_ABORT").ok().as_deref(),
+        );
+        self.execute_bounded(code, opts, hard).await
     }
 
     /// The bounded entry onto the shared execute path: the provisioner's
@@ -990,5 +994,32 @@ impl ReplKernelManager {
         lock(&self.inner.guarded).state = KernelState::Shutdown;
         live_kernels::remove_inner(&self.inner);
         self.inner.cleanup_resources(Signal::Term);
+    }
+}
+
+/// PLATFORM-PATCH 12: when `PRIME_AGENT_PLATFORM_HARD_CELL_ABORT=1`, the
+/// per-cell budget (`pythonCellTimeoutMs`, `0` = off) also aborts the cell
+/// (interrupt + grace) instead of only adding a stderr note.
+pub(crate) fn platform_hard_cell_timeout(budget_ms: Option<u64>, flag: Option<&str>) -> Option<u64> {
+    if flag != Some("1") {
+        return None;
+    }
+    budget_ms.filter(|ms| *ms > 0)
+}
+
+#[cfg(test)]
+mod platform_patch_12_tests {
+    use super::platform_hard_cell_timeout;
+
+    #[test]
+    fn hard_abort_is_opt_in_and_uses_the_cell_budget() {
+        assert_eq!(platform_hard_cell_timeout(Some(3_000_000), None), None);
+        assert_eq!(platform_hard_cell_timeout(Some(3_000_000), Some("0")), None);
+        assert_eq!(platform_hard_cell_timeout(Some(0), Some("1")), None);
+        assert_eq!(platform_hard_cell_timeout(None, Some("1")), None);
+        assert_eq!(
+            platform_hard_cell_timeout(Some(3_000_000), Some("1")),
+            Some(3_000_000)
+        );
     }
 }
