@@ -47,8 +47,8 @@ pub fn run_prompt_command(args: &[String]) -> i32 {
         Ok(parsed) => parsed,
         Err(help_request) if help_request.is_empty() => return 0,
         Err(error) => {
-            eprintln!("Error: {error}");
-            eprintln!("Run `prime-agent help prompt` for usage.");
+            pa_types::pa_eprintln!("Error: {error}");
+            pa_types::pa_eprintln!("Run `prime-agent help prompt` for usage.");
             return 1;
         }
     };
@@ -60,7 +60,7 @@ pub fn run_prompt_command(args: &[String]) -> i32 {
     match assemble_breakdown(&cwd, parsed.model.as_deref()) {
         Ok((breakdown, errors)) => {
             for error in &errors {
-                eprintln!("Error: {error}");
+                pa_types::pa_eprintln!("Error: {error}");
             }
             if parsed.json {
                 print_json(&breakdown);
@@ -70,7 +70,7 @@ pub fn run_prompt_command(args: &[String]) -> i32 {
             0
         }
         Err(error) => {
-            eprintln!("Error: {error:#}");
+            pa_types::pa_eprintln!("Error: {error:#}");
             1
         }
     }
@@ -130,32 +130,32 @@ fn assemble_breakdown(
 }
 
 fn print_text(breakdown: &pa_core::prompts::SystemPromptBreakdown) {
-    println!("# prime-agent system prompt breakdown");
-    println!();
-    println!("cached prefix (static layers, byte-stable across sessions):");
+    pa_types::pa_println!("# prime-agent system prompt breakdown");
+    pa_types::pa_println!();
+    pa_types::pa_println!("cached prefix (static layers, byte-stable across sessions):");
     for segment in &breakdown.segments {
         if segment.kind == pa_core::prompts::SegmentKind::Static {
             print_segment(segment);
         }
     }
-    println!("dynamic tail (session-specific, appended after the cached prefix):");
+    pa_types::pa_println!("dynamic tail (session-specific, appended after the cached prefix):");
     for segment in &breakdown.segments {
         if segment.kind == pa_core::prompts::SegmentKind::Dynamic {
             print_segment(segment);
         }
     }
-    println!();
-    println!(
+    pa_types::pa_println!();
+    pa_types::pa_println!(
         "cached prefix: {} of {} total chars; dynamic tail follows",
         breakdown.cached_prefix_len,
         breakdown.assembled.len()
     );
-    println!();
-    println!("{}", breakdown.assembled);
+    pa_types::pa_println!();
+    pa_types::pa_println!("{}", breakdown.assembled);
 }
 
 fn print_segment(segment: &pa_core::prompts::PromptSegment) {
-    println!(
+    pa_types::pa_println!(
         "  {:<20} {:<38} {:>7} chars",
         segment.name,
         segment.source,
@@ -176,7 +176,7 @@ fn print_json(breakdown: &pa_core::prompts::SystemPromptBreakdown) {
             })
         })
         .collect::<Vec<_>>();
-    println!(
+    pa_types::pa_println!(
         "{}",
         serde_json::json!({
             "segments": segments,

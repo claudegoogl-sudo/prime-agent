@@ -176,7 +176,7 @@ impl TurnBoundary {
                             "error": format!("{error}"),
                         }));
                     } else {
-                        eprintln!("pa-cli: {kind} refinement failed: {error:#}");
+                        pa_types::pa_eprintln!("pa-cli: {kind} refinement failed: {error:#}");
                     }
                 }
             }

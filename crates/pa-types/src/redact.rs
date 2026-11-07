@@ -219,16 +219,36 @@ impl Redactor {
 pub struct StreamRedactor {
     r: Arc<Redactor>,
     held: Vec<u8>,
+    /// `Some(generation)` for sinks created from the process matcher: they follow reloads (R-E).
+    live_gen: Option<u64>,
 }
 
 impl StreamRedactor {
     #[must_use]
     pub fn new(r: Arc<Redactor>) -> Self {
-        Self { r, held: Vec::new() }
+        Self { r, held: Vec::new(), live_gen: None }
     }
 
     /// Feed a chunk; returns bytes now safe to release.
     pub fn push(&mut self, chunk: &[u8]) -> Vec<u8> {
+        if let Some(gen) = self.live_gen {
+            let (now, cur, failed) = global()
+                .read()
+                .map_or((u64::MAX, None, true), |g| (g.generation, g.redactor.clone(), g.failed));
+            if now != gen || failed {
+                // Reload happened: follow the new matcher. Held bytes stay raw-in-memory and are
+                // re-scanned with the new needles. Failed => drop held bytes, release nothing raw.
+                if failed || cur.is_none() {
+                    self.held.clear();
+                    self.live_gen = Some(now);
+                    return b"[REDACTED:ERROR]\n".to_vec();
+                }
+                if let Some(c) = cur {
+                    self.r = c;
+                }
+                self.live_gen = Some(now);
+            }
+        }
         self.held.extend_from_slice(chunk);
         let keep = self.r.max_len.saturating_sub(1);
         if self.held.len() <= keep {
@@ -281,6 +301,36 @@ pub fn needles_from_env(vars: impl IntoIterator<Item = (String, String)>) -> Vec
         .collect()
 }
 
+/// R-H: for a value shaped like `scheme://user:pass@host/...` (URL or DSN) return the password
+/// and the `user:pass` pair, so the secret is still matched when only part of the URL is logged.
+#[must_use]
+pub fn userinfo_parts(value: &str) -> Vec<String> {
+    let Some((_, rest)) = value.split_once("://") else {
+        return Vec::new();
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let Some((userinfo, _)) = authority.rsplit_once('@') else {
+        return Vec::new();
+    };
+    let mut out = vec![userinfo.to_string()];
+    if let Some((_, pass)) = userinfo.split_once(':') {
+        out.push(pass.to_string());
+    }
+    out.retain(|p| p.len() >= MIN_ENV_NEEDLE_LEN);
+    out
+}
+
+fn with_userinfo(needles: Vec<(String, String)>) -> Vec<(String, String)> {
+    let mut out = Vec::with_capacity(needles.len());
+    for (n, v) in needles {
+        for (i, p) in userinfo_parts(&v).into_iter().enumerate() {
+            out.push((format!("{n}_USERINFO{i}"), p));
+        }
+        out.push((n, v));
+    }
+    out
+}
+
 /// Read a needles file (one value per line, marker name = `FILE_LINE_<n>`, never the content).
 /// Refuses symlinks (O_NOFOLLOW), anything not a regular file, group/world access, a different
 /// owner, and oversize files; the checks use the open fd (no check/open race).
@@ -291,6 +341,19 @@ pub fn needles_from_env(vars: impl IntoIterator<Item = (String, String)>) -> Vec
 pub fn read_needles_file(path: &std::path::Path) -> Result<Vec<(String, String)>, &'static str> {
     use std::io::Read as _;
     use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
+    // R-H: the parent directory must not be group/world-writable (rename/replace attack) and
+    // must be owned by this user or root.
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        let pm = std::fs::metadata(parent).map_err(|_| "needles file parent dir stat failed")?;
+        // SAFETY-free: geteuid has no preconditions.
+        let euid = unsafe { libc::geteuid() };
+        if pm.mode() & 0o022 != 0 {
+            return Err("needles file parent dir is group/world-writable");
+        }
+        if pm.uid() != euid && pm.uid() != 0 {
+            return Err("needles file parent dir has the wrong owner");
+        }
+    }
     let mut f = std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW)
@@ -336,11 +399,15 @@ struct Global {
     redactor: Option<Arc<Redactor>>,
     /// Fail-closed flag: set when the matcher could not be built. Never cleared by a failed rebuild.
     failed: bool,
+    /// Bumped on every successful reload so live stream sinks can follow (R-E).
+    generation: u64,
+    /// Needles file of the last reload attempt, reused by the fail-closed retry.
+    last_file: Option<std::path::PathBuf>,
 }
 
 fn global() -> &'static RwLock<Global> {
     static G: OnceLock<RwLock<Global>> = OnceLock::new();
-    G.get_or_init(|| RwLock::new(Global { redactor: None, failed: false }))
+    G.get_or_init(|| RwLock::new(Global { redactor: None, failed: false, generation: 0, last_file: None }))
 }
 
 /// Health flag for operators: true when redaction is fail-closed.
@@ -372,13 +439,15 @@ pub fn reload(
         if needles_file.is_some() {
             return Err("needles file unsupported on this platform".to_string());
         }
-        Redactor::new(&needles).map_err(|e| e.to_string())
+        Redactor::new(&with_userinfo(needles)).map_err(|e| e.to_string())
     })();
     let mut g = global().write().map_err(|_| "redaction state poisoned".to_string())?;
+    g.last_file = needles_file.map(std::path::Path::to_path_buf);
     match result {
         Ok(r) => {
             g.redactor = Some(Arc::new(r));
             g.failed = false;
+            g.generation += 1;
             Ok(())
         }
         Err(e) => {
@@ -397,6 +466,29 @@ pub fn reload_from_process_env() -> Result<(), String> {
     reload(std::env::vars(), file.as_deref())
 }
 
+/// Sticky deny-all must not be permanent (residual note): retry the rebuild at most every
+/// `RETRY_SECS` and log a content-free line. A successful retry clears the flag.
+const RETRY_SECS: u64 = 5;
+
+fn retry_failed_reload() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+        .max(1);
+    let last = LAST.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < RETRY_SECS
+        || LAST.compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed).is_err()
+    {
+        return;
+    }
+    let file = global().read().ok().and_then(|g| g.last_file.clone());
+    let ok = reload(std::env::vars(), file.as_deref()).is_ok();
+    // Content-free: reload errors never carry secret values.
+    eprintln!("prime-agent: redaction is fail-closed; reload retry {}", if ok { "succeeded" } else { "failed" });
+}
+
 fn current() -> Option<Arc<Redactor>> {
     let (empty, failed) = {
         let g = global().read().ok()?;
@@ -408,6 +500,8 @@ fn current() -> Option<Arc<Redactor>> {
     let g = global().read().ok()?;
     // Deny-all while failed (R-B): a rotated secret must never be written raw.
     if g.failed {
+        drop(g);
+        retry_failed_reload();
         return None;
     }
     g.redactor.clone()
@@ -425,7 +519,23 @@ fn redact_value(v: &mut serde_json::Value, r: &Redactor) -> bool {
             }
         }
         serde_json::Value::Array(a) => a.iter_mut().fold(false, |acc, x| redact_value(x, r) | acc),
-        serde_json::Value::Object(o) => o.values_mut().fold(false, |acc, x| redact_value(x, r) | acc),
+        serde_json::Value::Object(o) => {
+            // R-G: keys are data too. Rebuild in order (serde_json preserve_order) only if a key hit.
+            let mut changed = false;
+            let old = std::mem::take(o);
+            for (k, mut val) in old {
+                changed |= redact_value(&mut val, r);
+                let nk = r.redact(k.as_bytes());
+                let key = if nk == k.as_bytes() {
+                    k
+                } else {
+                    changed = true;
+                    String::from_utf8_lossy(&nk).into_owned()
+                };
+                o.insert(key, val);
+            }
+            changed
+        }
         _ => false,
     }
 }
@@ -434,7 +544,11 @@ fn redact_value(v: &mut serde_json::Value, r: &Redactor) -> bool {
 /// the caller must then write nothing raw).
 #[must_use]
 pub fn stream() -> Option<StreamRedactor> {
-    current().map(StreamRedactor::new)
+    let r = current()?;
+    let generation = global().read().ok()?.generation;
+    let mut s = StreamRedactor::new(r);
+    s.live_gen = Some(generation);
+    Some(s)
 }
 
 /// Sink for plain text / one JSON line without a trailing newline (stdout, stderr, logs).
@@ -465,13 +579,15 @@ fn redact_json_or_text(r: &Redactor, b: &[u8]) -> Vec<u8> {
 /// `println!` through the redaction sink (stdout). Use instead of `println!` in output paths.
 #[macro_export]
 macro_rules! pa_println {
-    ($($t:tt)*) => { println!("{}", $crate::redact::redact_text(&format!($($t)*))) };
+    () => {{ #[allow(clippy::disallowed_macros)] { println!() } }};
+    ($($t:tt)*) => {{ #[allow(clippy::disallowed_macros)] { println!("{}", $crate::redact::redact_text(&format!($($t)*))) } }};
 }
 
 /// `eprintln!` through the redaction sink (stderr).
 #[macro_export]
 macro_rules! pa_eprintln {
-    ($($t:tt)*) => { eprintln!("{}", $crate::redact::redact_text(&format!($($t)*))) };
+    () => {{ #[allow(clippy::disallowed_macros)] { eprintln!() } }};
+    ($($t:tt)*) => {{ #[allow(clippy::disallowed_macros)] { eprintln!("{}", $crate::redact::redact_text(&format!($($t)*))) } }};
 }
 
 /// Sink function for one serialized JSON line (R1): pass 1 on decoded string leaves, pass 2 on
@@ -501,6 +617,12 @@ mod tests {
     use super::*;
 
     const SECRET: &str = "s3cr3t/value+123=XYZ";
+
+    /// R-I: tests that touch the process-wide matcher must not interleave.
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        static M: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        M.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 
     fn red() -> Redactor {
         Redactor::new(&[("MY_API_KEY".to_string(), SECRET.to_string())]).unwrap()
@@ -651,7 +773,7 @@ mod tests {
 
     #[test]
     fn json_line_sink_redacts_leaves_and_bytes_and_fails_closed() {
-        // Global state: keep all assertions in one test.
+        let _g = serial();
         let secret = "line-secret-VALUE-0042";
         reload([("SINK_TEST_TOKEN".to_string(), secret.to_string())], None).unwrap();
         let line = format!("{{\"a\":\"x {secret} y\",\"n\":[1,\"{secret}\"]}}\n");
@@ -693,9 +815,55 @@ mod tests {
 
     #[test]
     fn text_sink_redacts_json_and_plain() {
+        let _g = serial();
         reload([("TEXT_SINK_TOKEN".to_string(), "text-secret-VALUE-77".to_string())], None).unwrap();
         assert_eq!(redact_text("a text-secret-VALUE-77 b"), "a [REDACTED:TEXT_SINK_TOKEN] b");
         let j = redact_text("{\"k\":\"text-secret-VALUE-77\"}");
         assert!(!j.contains("text-secret-VALUE-77") && j.contains("REDACTED"));
+    }
+
+    #[test]
+    fn live_stream_follows_reload_and_fails_closed() {
+        let _g = serial();
+        reload([("OLD_TOKEN".to_string(), "old-secret-VALUE-1111".to_string())], None).unwrap();
+        let mut st = stream().unwrap();
+        let _ = st.push(&[b'.'; 64]);
+        reload([("NEW_TOKEN".to_string(), "new-secret-VALUE-2222".to_string())], None).unwrap();
+        let mut out = st.push(b"a new-secret-VALUE-2222 b");
+        out.extend(st.push(&[b'.'; 64]));
+        let out = String::from_utf8(out).unwrap();
+        assert!(!out.contains("new-secret-VALUE-2222") && out.contains("[REDACTED:NEW_TOKEN]"), "{out}");
+        assert!(reload([], Some(std::path::Path::new("/nonexistent/n"))).is_err());
+        let o = String::from_utf8(st.push(b"new-secret-VALUE-2222")).unwrap();
+        assert!(!o.contains("new-secret") && o.contains("REDACTED:ERROR"));
+        assert!(redact_text("x") == "[REDACTED:ERROR]", "retry must reuse the bad file and stay closed");
+        reload([("NEW_TOKEN".to_string(), "new-secret-VALUE-2222".to_string())], None).unwrap();
+    }
+
+    #[test]
+    fn json_keys_and_userinfo_are_redacted() {
+        let _g = serial();
+        let dsn = "postgres://dbuser:hunter2-pass-XYZ@db.internal:5432/app";
+        reload([("DB_URL_SECRET".to_string(), dsn.to_string())], None).unwrap();
+        let line = b"{\"hunter2-pass-XYZ\":1,\"z\":\"p=hunter2-pass-XYZ\",\"a\":2}\n";
+        let out = String::from_utf8(redact_json_line(line)).unwrap();
+        assert!(!out.contains("hunter2-pass-XYZ"), "{out}");
+        // key order preserved
+        assert!(out.find("\"z\"").unwrap() < out.find("\"a\"").unwrap());
+        assert_eq!(userinfo_parts("https://tok-abcdefgh@h/x"), vec!["tok-abcdefgh".to_string()]);
+        assert!(userinfo_parts("https://host/p").is_empty());
+    }
+
+    #[test]
+    fn needles_file_parent_dir_must_not_be_writable() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("needles");
+        std::fs::write(&f, "value-one-1234\n").unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert_eq!(read_needles_file(&f).unwrap_err(), "needles file parent dir is group/world-writable");
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(read_needles_file(&f).is_ok());
     }
 }

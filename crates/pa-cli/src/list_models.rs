@@ -19,11 +19,11 @@ async fn list(options: &RunOptions) -> Result<i32, String> {
     let mut registry =
         pa_core::models::ModelRegistry::create(auth, config.agent_dir.join("models.json"));
     if let Some(error) = registry.get_error() {
-        eprintln!("Warning: errors loading models.json:\n{error}");
+        pa_types::pa_eprintln!("Warning: errors loading models.json:\n{error}");
     }
     let models = registry.refresh_available_models().await;
     if models.is_empty() {
-        println!("{}", no_models_available_message());
+        pa_types::pa_println!("{}", no_models_available_message());
         return Ok(0);
     }
     let search = options.list_models.clone().flatten();
@@ -34,7 +34,7 @@ async fn list(options: &RunOptions) -> Result<i32, String> {
                     format!("{} {}", model.provider, model.id)
                 });
             if matched.is_empty() {
-                println!("No models matching \"{pattern}\"");
+                pa_types::pa_println!("No models matching \"{pattern}\"");
                 return Ok(0);
             }
             matched
@@ -144,9 +144,9 @@ fn print_table(models: &[pa_types::ai::Model]) {
             .collect::<Vec<_>>()
             .join("  ")
     };
-    println!("{}", line(HEADERS));
+    pa_types::pa_println!("{}", line(HEADERS));
     for row in &rows {
-        println!("{}", line(row.cells()));
+        pa_types::pa_println!("{}", line(row.cells()));
     }
 }
 

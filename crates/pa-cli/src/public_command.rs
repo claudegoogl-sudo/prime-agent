@@ -55,9 +55,9 @@ use std::io::IsTerminal as _;
 /// The error message used when a routed command needs a runtime subsystem that is not linked into
 /// this build yet.
 fn fail(message: impl AsRef<str>, hint: Option<String>) -> PublicCommandResult {
-    eprintln!("Error: {}", message.as_ref());
+    pa_types::pa_eprintln!("Error: {}", message.as_ref());
     if let Some(hint) = hint {
-        eprintln!("{hint}");
+        pa_types::pa_eprintln!("{hint}");
     }
     PublicCommandResult {
         handled: true,
@@ -192,7 +192,7 @@ pub fn handle_public_command(args: &[String]) -> PublicCommandResult {
 
 fn print_requested_help(path: &[String]) -> PublicCommandResult {
     if path.is_empty() {
-        println!("{}", format_top_level_help());
+        pa_types::pa_println!("{}", format_top_level_help());
         return handled();
     }
     if REMOVED_COMMAND_NAMES.contains(&path[0].as_str()) {
@@ -200,7 +200,7 @@ fn print_requested_help(path: &[String]) -> PublicCommandResult {
     }
     let path_ref: Vec<&str> = path.iter().map(String::as_str).collect();
     if let Some(help) = format_command_help(&path_ref) {
-        println!("{help}");
+        pa_types::pa_println!("{help}");
         return handled();
     }
     let parent: Vec<&str> = path[..path.len() - 1].iter().map(String::as_str).collect();
@@ -499,7 +499,7 @@ fn run_telemetry(args: &[String]) -> PublicCommandResult {
     };
     match report {
         Ok(report) => {
-            println!("{report}");
+            pa_types::pa_println!("{report}");
             handled()
         }
         Err(error) => fail(format!("{error:#}"), None),
@@ -555,7 +555,7 @@ fn run_shutdown(args: &[String]) -> PublicCommandResult {
 fn run_mcp(args: &[String]) -> PublicCommandResult {
     match run_mcp_management_command(args) {
         Ok(message) => {
-            println!("{message}");
+            pa_types::pa_println!("{message}");
             handled()
         }
         Err(error) => fail(error.to_string(), None),

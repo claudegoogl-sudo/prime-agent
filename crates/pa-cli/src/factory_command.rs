@@ -132,13 +132,13 @@ pub fn run_factory_command(args: &[String]) -> i32 {
     let command = match parse_factory_command(args) {
         Ok(command) => command,
         Err(empty_hint) if empty_hint.is_empty() => {
-            eprintln!("Missing factory command.");
-            eprintln!("Run \"prime-agent help factory\" for usage.");
+            pa_types::pa_eprintln!("Missing factory command.");
+            pa_types::pa_eprintln!("Run \"prime-agent help factory\" for usage.");
             return 1;
         }
         Err(error) => {
-            eprintln!("Error: {error}");
-            eprintln!("Run `prime-agent help factory` for usage.");
+            pa_types::pa_eprintln!("Error: {error}");
+            pa_types::pa_eprintln!("Run `prime-agent help factory` for usage.");
             return 1;
         }
     };
@@ -178,7 +178,7 @@ fn run_list(json: bool) -> i32 {
     match resolve_kernel_python().and_then(|python| dispatch_via_kernel(&python, &payload)) {
         Ok(result) => render_list(&result, json),
         Err(error) => {
-            eprintln!("Error: {error}");
+            pa_types::pa_eprintln!("Error: {error}");
             1
         }
     }
@@ -191,7 +191,7 @@ fn render_list(result: &Value, json: bool) -> i32 {
         return code;
     }
     if json {
-        println!(
+        pa_types::pa_println!(
             "{}",
             serde_json::to_string_pretty(result).unwrap_or_default()
         );
@@ -213,10 +213,10 @@ fn render_list(result: &Value, json: bool) -> i32 {
         })
         .unwrap_or_default()
     {
-        eprintln!("Warning: {warning}");
+        pa_types::pa_eprintln!("Warning: {warning}");
     }
     if machines.is_empty() {
-        println!("No machines in the library.");
+        pa_types::pa_println!("No machines in the library.");
         return 0;
     }
     let name_width = machines
@@ -225,7 +225,7 @@ fn render_list(result: &Value, json: bool) -> i32 {
         .max()
         .unwrap_or(0);
     for machine in &machines {
-        println!("{}", listing_row(machine, name_width));
+        pa_types::pa_println!("{}", listing_row(machine, name_width));
     }
     0
 }
@@ -307,14 +307,14 @@ fn dispatch_via_kernel(python: &std::path::Path, payload: &Value) -> Result<Valu
 fn run_import(path: &str, json: bool) -> i32 {
     let source = crate::config::expand_tilde_path(path);
     if !source.is_file() {
-        eprintln!("Error: machine file not found: {}", source.display());
+        pa_types::pa_eprintln!("Error: machine file not found: {}", source.display());
         return 1;
     }
     let payload = import_payload(&source);
     match resolve_kernel_python().and_then(|python| dispatch_via_kernel(&python, &payload)) {
         Ok(result) => print_dispatch_result(&result, json, "imported"),
         Err(error) => {
-            eprintln!("Error: {error}");
+            pa_types::pa_eprintln!("Error: {error}");
             1
         }
     }
@@ -326,7 +326,7 @@ fn run_export(name: &str, out: &str, json: bool) -> i32 {
     match resolve_kernel_python().and_then(|python| dispatch_via_kernel(&python, &payload)) {
         Ok(result) => print_dispatch_result(&result, json, "exported"),
         Err(error) => {
-            eprintln!("Error: {error}");
+            pa_types::pa_eprintln!("Error: {error}");
             1
         }
     }
@@ -350,7 +350,7 @@ fn print_dispatch_errors(result: &Value) -> Option<i32> {
         return None;
     }
     for error in dispatch_error_sentences(result) {
-        eprintln!("Error: {error}");
+        pa_types::pa_eprintln!("Error: {error}");
     }
     Some(1)
 }
@@ -363,7 +363,7 @@ fn print_dispatch_result(result: &Value, json: bool, verb: &str) -> i32 {
         return code;
     }
     if json {
-        println!(
+        pa_types::pa_println!(
             "{}",
             serde_json::to_string_pretty(result).unwrap_or_default()
         );
@@ -380,11 +380,11 @@ fn print_dispatch_result(result: &Value, json: bool, verb: &str) -> i32 {
     let source = result.get("source").and_then(Value::as_str);
     if verb == "exported" {
         match source {
-            Some(source) => println!("Exported {name} to {path} (from {source})."),
-            None => println!("Exported {name} to {path}."),
+            Some(source) => pa_types::pa_println!("Exported {name} to {path} (from {source})."),
+            None => pa_types::pa_println!("Exported {name} to {path}."),
         }
     } else {
-        println!("Imported {name} into {path}.");
+        pa_types::pa_println!("Imported {name} into {path}.");
     }
     0
 }

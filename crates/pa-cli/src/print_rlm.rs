@@ -543,7 +543,7 @@ async fn settle_child(child: &Arc<InlineChild>, run_error: Option<String>) {
                 )),
             };
             if let Err(error) = delivered {
-                eprintln!("pa-cli: RLM child notice was not delivered: {error:#}");
+                pa_types::pa_eprintln!("pa-cli: RLM child notice was not delivered: {error:#}");
             }
         }
     }

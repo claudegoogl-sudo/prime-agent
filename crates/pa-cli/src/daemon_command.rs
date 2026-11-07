@@ -123,8 +123,8 @@ fn require_success(response: pa_types::daemon::DaemonResponse) -> Result<Option<
 
 fn print_json(value: &Value) {
     match serde_json::to_string_pretty(value) {
-        Ok(text) => println!("{text}"),
-        Err(error) => eprintln!("Error: {error}"),
+        Ok(text) => pa_types::pa_println!("{text}"),
+        Err(error) => pa_types::pa_eprintln!("Error: {error}"),
     }
 }
 
@@ -154,7 +154,7 @@ fn run_list(client: &mut DaemonClient, args: &[String], json: bool) -> Result<()
         return Ok(());
     };
     if sessions.is_empty() {
-        println!(
+        pa_types::pa_println!(
             "{}",
             if all {
                 "No agents."
@@ -164,7 +164,7 @@ fn run_list(client: &mut DaemonClient, args: &[String], json: bool) -> Result<()
         );
         return Ok(());
     }
-    println!("{}", format_session_list_table(&sessions));
+    pa_types::pa_println!("{}", format_session_list_table(&sessions));
     Ok(())
 }
 
@@ -201,7 +201,7 @@ fn run_sessions(client: &mut DaemonClient, args: &[String], json: bool) -> Resul
         return Ok(());
     };
     if sessions.is_empty() {
-        println!(
+        pa_types::pa_println!(
             "{}",
             if all {
                 "No agents."
@@ -211,7 +211,7 @@ fn run_sessions(client: &mut DaemonClient, args: &[String], json: bool) -> Resul
         );
         return Ok(());
     }
-    println!(
+    pa_types::pa_println!(
         "{}",
         crate::sessions_table_format::format_sessions_table(
             &sessions,
@@ -279,7 +279,7 @@ fn print_response_data(response: &pa_types::daemon::DaemonResponse, json: bool) 
         print_json(&value);
         return Ok(());
     }
-    println!("ok");
+    pa_types::pa_println!("ok");
     Ok(())
 }
 
@@ -325,7 +325,7 @@ fn run_rename(client: &mut DaemonClient, args: &[String], json: bool) -> Result<
     match live_session_summary(&data) {
         Some(summary) => {
             let summary_name = summary.get("sessionName").and_then(Value::as_str);
-            println!(
+            pa_types::pa_println!(
                 "Renamed {} to {}",
                 summary
                     .get("activeSessionId")
@@ -378,11 +378,11 @@ fn run_send(client: &mut DaemonClient, args: &[String], json: bool) -> Result<()
         })
         .map(str::to_string);
     let Some(target) = receipt_target else {
-        println!("ok");
+        pa_types::pa_println!("ok");
         return Ok(());
     };
     let queued = data.get("deliveryStatus").and_then(Value::as_str) == Some("queued");
-    println!(
+    pa_types::pa_println!(
         "{}",
         if queued {
             format!("Queued for {target}")
@@ -489,11 +489,11 @@ fn run_cron_list(client: &mut DaemonClient, args: &[String], json: bool) -> Resu
         return Ok(());
     };
     if jobs.is_empty() {
-        println!("No scheduled prompts.");
+        pa_types::pa_println!("No scheduled prompts.");
         return Ok(());
     }
     for job in jobs {
-        println!("{}", format_agent_cron_job(job));
+        pa_types::pa_println!("{}", format_agent_cron_job(job));
     }
     Ok(())
 }
@@ -529,8 +529,8 @@ fn run_cron_add(client: &mut DaemonClient, args: &[String], json: bool) -> Resul
         return Ok(());
     }
     match cron_job_id_and_next_run(&data) {
-        Some((id, next_run)) => println!("Scheduled {id} next={next_run}"),
-        None => println!("Scheduled prompt."),
+        Some((id, next_run)) => pa_types::pa_println!("Scheduled {id} next={next_run}"),
+        None => pa_types::pa_println!("Scheduled prompt."),
     }
     Ok(())
 }
@@ -551,8 +551,8 @@ fn run_cron_cancel(client: &mut DaemonClient, args: &[String], json: bool) -> Re
         return Ok(());
     }
     match cron_job_id_and_next_run(&data) {
-        Some((id, _)) => println!("Cancelled {id}"),
-        None => println!("Cancelled cron job."),
+        Some((id, _)) => pa_types::pa_println!("Cancelled {id}"),
+        None => pa_types::pa_println!("Cancelled cron job."),
     }
     Ok(())
 }

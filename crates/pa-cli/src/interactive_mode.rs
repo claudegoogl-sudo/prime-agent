@@ -227,7 +227,7 @@ pub(super) fn flush_startup_telemetry(
 /// guard's grace window.
 fn print_resume_hint(hint: Option<&str>) {
     if let Some(hint) = hint {
-        println!("\x1b[2m{hint}\x1b[22m");
+        pa_types::pa_println!("\x1b[2m{hint}\x1b[22m");
     }
     pa_tui::exit_guard::note_exit_progress();
 }
@@ -410,7 +410,7 @@ fn build_tui_options(
     if let Err(error) = pa_tui::keybindings::migrate_keybindings_file(&config.agent_dir) {
         // A failed migration never blocks startup: the manager below
         // falls back to the previous file contents (or the defaults).
-        eprintln!("Warning: could not migrate keybindings: {error:#}");
+        pa_types::pa_eprintln!("Warning: could not migrate keybindings: {error:#}");
     }
     let keybindings = pa_tui::keybindings::KeybindingsManager::create(&config.agent_dir);
     // Test seam: a scripted faux daemon session; never set by the product.

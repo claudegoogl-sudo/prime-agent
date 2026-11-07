@@ -114,7 +114,7 @@ impl PrintGoalSurface {
     pub(crate) fn new(json_mode: bool) -> Self {
         Self {
             json_mode,
-            sink: Arc::new(|event| println!("{event}")),
+            sink: Arc::new(|event| pa_types::pa_println!("{event}")),
             budget_crossed: AtomicBool::new(false),
             queued: Mutex::new(None),
             active_label: Mutex::new(None),
@@ -428,7 +428,7 @@ impl PrintGoalSurface {
                                     }
                                     Ok(_) => {}
                                     Err(error) => {
-                                        eprintln!(
+                                        pa_types::pa_eprintln!(
                                             "pa-cli: goal usage accounting persist failed: {error:#}"
                                         );
                                     }

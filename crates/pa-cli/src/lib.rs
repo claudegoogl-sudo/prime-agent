@@ -78,7 +78,7 @@ pub fn main_with_runtime(args: &[String], runtime: &dyn mode::Runtime) -> i32 {
     match main_impl(args, runtime) {
         Ok(code) => code,
         Err(error) => {
-            eprintln!("Error: {error}");
+            pa_types::pa_eprintln!("Error: {error}");
             1
         }
     }
@@ -127,7 +127,7 @@ fn main_impl(args: &[String], runtime: &dyn mode::Runtime) -> Result<i32, String
             } else {
                 "Warning"
             };
-            eprintln!("{label}: {}", diagnostic.message);
+            pa_types::pa_eprintln!("{label}: {}", diagnostic.message);
         }
         if parsed.diagnostics.iter().any(|d| d.is_error) {
             return Ok(1);
@@ -149,11 +149,11 @@ fn main_impl(args: &[String], runtime: &dyn mode::Runtime) -> Result<i32, String
     }
 
     if parsed.version {
-        println!("{}", crate::config::version());
+        pa_types::pa_println!("{}", crate::config::version());
         return Ok(0);
     }
     if parsed.help {
-        println!("{}", command_registry::format_top_level_help());
+        pa_types::pa_println!("{}", command_registry::format_top_level_help());
         return Ok(0);
     }
 
@@ -272,7 +272,7 @@ fn main_impl(args: &[String], runtime: &dyn mode::Runtime) -> Result<i32, String
                 processed.images,
             ),
             Err(error) => {
-                eprintln!("{}", error.message);
+                pa_types::pa_eprintln!("{}", error.message);
                 return Ok(1);
             }
         }
@@ -331,7 +331,7 @@ fn run_runtime_bootstrap() -> Result<i32, String> {
         pa_core::kernel::EnsureKernelPythonOptions::default(),
     )) {
         Ok(python) => {
-            println!("kernel python: {}", python.display());
+            pa_types::pa_println!("kernel python: {}", python.display());
             Ok(0)
         }
         Err(error) => Err(format!("{error:#}")),

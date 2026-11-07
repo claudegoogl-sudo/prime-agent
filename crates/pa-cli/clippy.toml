@@ -1,0 +1,9 @@
+# PLATFORM-PATCH 7 (R-A): output must go through the redaction sink.
+allow-print-in-tests = true
+disallowed-macros = [
+    { path = "std::println", reason = "use pa_types::pa_println! (redaction sink)" },
+    { path = "std::eprintln", reason = "use pa_types::pa_eprintln! (redaction sink)" },
+    { path = "std::print", reason = "raw stdout write bypasses redaction; use pa_println!" },
+    { path = "std::eprint", reason = "raw stderr write bypasses redaction; use pa_eprintln!" },
+    { path = "std::dbg", reason = "dbg! prints raw values" },
+]

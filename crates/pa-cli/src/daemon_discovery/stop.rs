@@ -28,17 +28,17 @@ use super::{discover_daemons, is_daemon_process_listening, probe_daemon, DaemonS
 pub(crate) fn run_ps(json: bool, root: &DaemonStateRoot) {
     let daemons = discover_daemons(root);
     if json {
-        println!(
+        pa_types::pa_println!(
             "{}",
             serde_json::to_string_pretty(&daemons).unwrap_or_default()
         );
         return;
     }
     if daemons.is_empty() {
-        println!("No background services found.");
+        pa_types::pa_println!("No background services found.");
         return;
     }
-    println!("{}", super::format_daemon_list_table(&daemons));
+    pa_types::pa_println!("{}", super::format_daemon_list_table(&daemons));
 }
 
 /// `doctor --fix`: clean up clearly-safe daemons. Returns the process
@@ -96,7 +96,7 @@ pub(crate) fn run_reap(json: bool, root: &DaemonStateRoot) -> i32 {
         }
     }
     if json {
-        println!("{}", reap_report_json(&reaped, &skipped));
+        pa_types::pa_println!("{}", reap_report_json(&reaped, &skipped));
         return 0;
     }
     print_reap_report(&reaped, &skipped);
@@ -165,13 +165,13 @@ pub(crate) fn run_shutdown_all(json: bool, force: bool, root: &DaemonStateRoot) 
                     )
                 })
                 .collect();
-            println!("{}", shutdown_report_json(&[], &failed));
+            pa_types::pa_println!("{}", shutdown_report_json(&[], &failed));
             1
         }
         ShutdownConfirmationPlan::TtyError => {
             // The public-command wrapper turns the throw into the standard `Error: …`
             // failure (stderr + exit 1); only reachable once there are daemons to stop.
-            eprintln!(
+            pa_types::pa_eprintln!(
                 "Error: Shutdown requires confirmation in an interactive terminal. Use \"prime-agent shutdown --force\"."
             );
             1
@@ -180,7 +180,7 @@ pub(crate) fn run_shutdown_all(json: bool, force: bool, root: &DaemonStateRoot) 
             if !prompt_yes_no(
                 "Stop every agent and background service? Active work will be interrupted.",
             ) {
-                println!("\x1b[2mShutdown cancelled.\x1b[22m");
+                pa_types::pa_println!("\x1b[2mShutdown cancelled.\x1b[22m");
                 return 0;
             }
             run_shutdown_converging(json, force, root)
@@ -314,7 +314,7 @@ fn run_shutdown_converging(json: bool, force: bool, root: &DaemonStateRoot) -> i
 
     // The exit code follows the failures in both output modes.
     if json {
-        println!("{}", shutdown_report_json(&stopped, &failed));
+        pa_types::pa_println!("{}", shutdown_report_json(&stopped, &failed));
         return i32::from(!failed.is_empty());
     }
     print_shutdown_report(&stopped, &failed);
@@ -416,7 +416,9 @@ fn shutdown_daemon(socket_path: &Path, force: bool) -> bool {
 /// Empty or anything-but-yes resolves false (default No).
 pub(crate) fn prompt_yes_no(message: &str) -> bool {
     use std::io::Write as _;
-    print!("{message} [y/N] ");
+    // Prompt text goes through the redaction sink; `print!` itself is the interactive prompt.
+    #[allow(clippy::disallowed_macros)]
+    print!("{} [y/N] ", pa_types::redact::redact_text(message));
     let _ = std::io::stdout().flush();
     let mut answer = String::new();
     if std::io::stdin().read_line(&mut answer).is_err() {

@@ -157,28 +157,28 @@ fn pad_end(text: &str, width: usize) -> String {
 /// The reap report: green `reaped` lines then dim `kept` lines.
 pub(crate) fn print_reap_report(reaped: &[(String, String)], skipped: &[(String, String)]) {
     if reaped.is_empty() && skipped.is_empty() {
-        println!("No background services found.");
+        pa_types::pa_println!("No background services found.");
         return;
     }
     for (socket_path, action) in reaped {
-        println!("{}", green(&format!("reaped {socket_path}: {action}")));
+        pa_types::pa_println!("{}", green(&format!("reaped {socket_path}: {action}")));
     }
     for (socket_path, reason) in skipped {
-        println!("{}", dim(&format!("kept   {socket_path}: {reason}")));
+        pa_types::pa_println!("{}", dim(&format!("kept   {socket_path}: {reason}")));
     }
 }
 
 /// The shutdown report: green `stopped` lines then red `failed` lines.
 pub(crate) fn print_shutdown_report(stopped: &[(String, String)], failed: &[(String, String)]) {
     if stopped.is_empty() && failed.is_empty() {
-        println!("No background services found.");
+        pa_types::pa_println!("No background services found.");
         return;
     }
     for (socket_path, action) in stopped {
-        println!("{}", green(&format!("stopped {socket_path}: {action}")));
+        pa_types::pa_println!("{}", green(&format!("stopped {socket_path}: {action}")));
     }
     for (socket_path, reason) in failed {
-        println!("{}", red(&format!("failed  {socket_path}: {reason}")));
+        pa_types::pa_println!("{}", red(&format!("failed  {socket_path}: {reason}")));
     }
 }
 

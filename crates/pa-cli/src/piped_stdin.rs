@@ -54,7 +54,7 @@ pub fn read_piped_stdin(idle_timeout_ms: u64) -> Option<String> {
     });
     let (data, idle_expired) = collect_from(&receiver, idle_timeout_ms);
     if idle_expired {
-        eprintln!(
+        pa_types::pa_eprintln!(
             "stdin did not close within {idle_timeout_ms}ms; continuing without waiting for more piped input"
         );
     }

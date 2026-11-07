@@ -39,7 +39,7 @@ pub fn confirm_nightly_switch(
     if channel != Some(UpdateChannel::Nightly) || persisted_wire == Some("nightly") {
         return None;
     }
-    println!(
+    pa_types::pa_println!(
         "Nightly releases are unreleased Prime Agent builds. They can be broken, and a broken update can leave Prime Agent unusable until you roll back or reinstall."
     );
     let abort_code = if std::env::var(crate::public_command::SELF_UPDATE_INTERACTIVE_CHILD_ENV)
@@ -52,7 +52,7 @@ pub fn confirm_nightly_switch(
     };
     if !force {
         if !stdin_is_terminal {
-            eprintln!(
+            pa_types::pa_eprintln!(
                 "Switching to the nightly channel needs confirmation. Re-run with --force to proceed."
             );
             return Some(abort_code);
@@ -60,7 +60,7 @@ pub fn confirm_nightly_switch(
         if !crate::daemon_discovery::stop::prompt_yes_no(
             "Switching to the nightly channel and continue with the update?",
         ) {
-            println!("Update cancelled. Nothing was changed.");
+            pa_types::pa_println!("Update cancelled. Nothing was changed.");
             return Some(abort_code);
         }
     }
@@ -90,7 +90,7 @@ pub fn run(options: &SelfUpdateOptions, persisted_wire: Option<&str>) -> i32 {
     {
         Ok(runtime) => runtime,
         Err(error) => {
-            eprintln!("Error: Could not start the update runtime: {error}.");
+            pa_types::pa_eprintln!("Error: Could not start the update runtime: {error}.");
             return 1;
         }
     };
@@ -113,14 +113,14 @@ pub fn run(options: &SelfUpdateOptions, persisted_wire: Option<&str>) -> i32 {
                         crate::config::get_agent_dir(),
                     );
                     if settings.set_update_channel(settings_channel).is_ok() {
-                        println!("Updates now follow the {wire} channel.");
+                        pa_types::pa_println!("Updates now follow the {wire} channel.");
                     }
                 }
             }
             code
         }
         Err(error) => {
-            eprintln!("Error: {error:#}");
+            pa_types::pa_eprintln!("Error: {error:#}");
             1
         }
     }

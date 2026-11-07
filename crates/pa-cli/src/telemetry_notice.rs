@@ -19,11 +19,11 @@ pub(crate) fn print_if_due(config: &RuntimeConfig) {
     if settings.get_telemetry_notice_shown() {
         return;
     }
-    eprintln!(
+    pa_types::pa_eprintln!(
         "Prime Agent sends pseudonymous usage and performance metrics without prompts, responses, tool content, file paths, or repository data. Disable this with /telemetry off, telemetry.enabled=false, PRIME_AGENT_TELEMETRY=0, DO_NOT_TRACK=1, or offline mode."
     );
     if let Err(error) = settings.set_telemetry_notice_shown(true) {
-        eprintln!("Warning: could not persist the telemetry notice: {error}");
+        pa_types::pa_eprintln!("Warning: could not persist the telemetry notice: {error}");
     }
 }
 

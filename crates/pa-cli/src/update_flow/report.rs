@@ -64,10 +64,10 @@ impl UpdateReport {
     /// Print to stdout/stderr the way the CLI reports commands.
     pub fn print(&self) {
         for line in &self.info {
-            println!("{line}");
+            pa_types::pa_println!("{line}");
         }
         for line in &self.warnings {
-            eprintln!("{line}");
+            pa_types::pa_eprintln!("{line}");
         }
     }
 }

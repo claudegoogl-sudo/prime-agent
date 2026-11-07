@@ -12,7 +12,7 @@ pub fn run(parsed: &Args, agent_dir: &std::path::Path) -> Result<i32, String> {
     let output = parsed.messages.first().map(String::as_str);
     match pa_core::export_html::export_from_file(std::path::Path::new(input), output, agent_dir) {
         Ok(path) => {
-            println!("Exported to: {path}");
+            pa_types::pa_println!("Exported to: {path}");
             Ok(0)
         }
         Err(error) => Err(error.to_string()),

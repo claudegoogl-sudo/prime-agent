@@ -306,8 +306,8 @@ pub(crate) fn run_incident(
 ) -> Result<(), IncidentUsageError> {
     let now_ms = crate::util_time::now_ms() as i64;
     match incident_report_text(options, window, now_ms)? {
-        Some(text) => println!("{text}"),
-        None => println!(
+        Some(text) => pa_types::pa_println!("{text}"),
+        None => pa_types::pa_println!(
             "No daemon logs found under {}.",
             incident_logs_dir().display()
         ),

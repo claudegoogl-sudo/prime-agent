@@ -152,7 +152,7 @@ pub async fn run_update_command(options: &UpdateCommandOptions) -> Result<i32> {
             writer.set_message(Some(reason.clone()))?;
             release(&agent_dir, &socket_path.to_string_lossy())?;
             track_update_completed(writer.current()).await;
-            println!("{reason}");
+            pa_types::pa_println!("{reason}");
             // An interactive child reports no-change with the not-attempted
             // code so the client keeps running (TS `setSelfUpdateNoChangeExitCode`).
             let interactive_child =
@@ -208,7 +208,7 @@ pub async fn run_update_command(options: &UpdateCommandOptions) -> Result<i32> {
     let status = tail_status_with(&status_path, Some(&mut child), &mut |observed, _fresh| {
         phases.phase(observed);
         if let Some(line) = phase_status_line(observed.state) {
-            println!("{line}");
+            pa_types::pa_println!("{line}");
         }
     })
     .await;
@@ -216,7 +216,7 @@ pub async fn run_update_command(options: &UpdateCommandOptions) -> Result<i32> {
     // plain thread does not hold the async runtime open for a detached child.
     std::thread::spawn(move || {
         if let Err(error) = child.wait() {
-            eprintln!("Warning: could not reap the update coordinator: {error}");
+            pa_types::pa_eprintln!("Warning: could not reap the update coordinator: {error}");
         }
     });
     phases.finish().await;
@@ -370,8 +370,8 @@ fn print_terminal(status: &UpdateStatus) {
     UpdateReport::build(status).print();
     if let Some(message) = &status.message {
         match status.state {
-            UpdateState::Complete | UpdateState::Skipped => println!("{message}"),
-            _ => eprintln!("{message}"),
+            UpdateState::Complete | UpdateState::Skipped => pa_types::pa_println!("{message}"),
+            _ => pa_types::pa_eprintln!("{message}"),
         }
     }
 }
@@ -623,7 +623,7 @@ pub async fn run_coordinator_mode(
     // never writes status elsewhere.
     let restarts_dir = pa_types::daemon::update_flow::update_restarts_dir(&agent_dir);
     if !status_path.starts_with(&restarts_dir) {
-        eprintln!("Invalid daemon update restart coordinator invocation.");
+        pa_types::pa_eprintln!("Invalid daemon update restart coordinator invocation.");
         return Ok(1);
     }
     let legacy_handoff = match std::fs::read(&status_path) {

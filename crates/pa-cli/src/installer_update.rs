@@ -94,7 +94,7 @@ pub fn run(options: &UpdateOptions) -> i32 {
             .and_then(homebrew::managed_kind)
     };
     if let Some(kind) = homebrew_kind {
-        println!("{}", homebrew::upgrade_instruction(kind));
+        pa_types::pa_println!("{}", homebrew::upgrade_instruction(kind));
         // The refusal must not depend on telemetry. A one-shot runtime is
         // only needed when recording is enabled; failure to record never
         // changes the instruction or the no-install exit code.
@@ -132,7 +132,7 @@ pub fn run(options: &UpdateOptions) -> i32 {
         .enable_all()
         .build()
     else {
-        eprintln!("Error: could not start the update runtime.");
+        pa_types::pa_eprintln!("Error: could not start the update runtime.");
         return 1;
     };
     if options.check {
@@ -143,7 +143,7 @@ pub fn run(options: &UpdateOptions) -> i32 {
     // fetches from, and the banner must not claim a source the run will
     // not use.
     let channel = requested_installer_channel(options.channel);
-    println!(
+    pa_types::pa_println!(
         "Updating to the latest Rust build — fetching the installer from {}:",
         installer::installer_script_url(Some(channel))
     );
@@ -154,10 +154,10 @@ pub fn run(options: &UpdateOptions) -> i32 {
         Ok(installed) => {
             match installed.version {
                 Some(version) => {
-                    println!("updated to {version} — restart prime-agent to run the new build");
+                    pa_types::pa_println!("updated to {version} — restart prime-agent to run the new build");
                 }
                 None => {
-                    println!(
+                    pa_types::pa_println!(
                         "updated to the latest build — restart prime-agent to run the new build"
                     );
                 }
@@ -168,7 +168,7 @@ pub fn run(options: &UpdateOptions) -> i32 {
             0
         }
         Err(failure) => {
-            eprintln!("Error: {}", failure.message);
+            pa_types::pa_eprintln!("Error: {}", failure.message);
             1
         }
     }
@@ -183,7 +183,7 @@ pub fn run_local(prefix: &std::path::Path, archive: Option<&std::path::Path>) ->
     let archive = match archive.map(std::path::absolute).transpose() {
         Ok(archive) => archive,
         Err(error) => {
-            eprintln!("Error: could not resolve the archive path: {error}");
+            pa_types::pa_eprintln!("Error: could not resolve the archive path: {error}");
             return 1;
         }
     };
@@ -195,7 +195,7 @@ pub fn run_local(prefix: &std::path::Path, archive: Option<&std::path::Path>) ->
         .enable_all()
         .build()
     else {
-        eprintln!("Error: could not start the update runtime.");
+        pa_types::pa_eprintln!("Error: could not start the update runtime.");
         return 1;
     };
     #[cfg(windows)]
@@ -211,7 +211,7 @@ pub fn run_local(prefix: &std::path::Path, archive: Option<&std::path::Path>) ->
                 // the child is spawned by now, so a refused pre-flight
                 // (which returns Err below) never announced a background
                 // run that does not exist.
-                println!(
+                pa_types::pa_println!(
                     "the {} continues in the background after this command exits — Windows only releases the payload once this process does",
                     if archive.is_some() { "archive install" } else { "rollback" }
                 );
@@ -223,11 +223,11 @@ pub fn run_local(prefix: &std::path::Path, archive: Option<&std::path::Path>) ->
                 "rolled back to"
             };
             let version = installed.version.as_deref().unwrap_or("the previous build");
-            println!("{done} {version} — restart prime-agent to run it");
+            pa_types::pa_println!("{done} {version} — restart prime-agent to run it");
             0
         }
         Err(failure) => {
-            eprintln!("Error: {}", failure.message);
+            pa_types::pa_eprintln!("Error: {}", failure.message);
             1
         }
     }
@@ -246,7 +246,7 @@ fn save_channel(channel: UpdateChannel) {
     let mut settings =
         pa_core::settings::SettingsManager::create(&cwd, crate::config::get_agent_dir());
     if settings.set_update_channel(setting).is_ok() {
-        println!("Updates now follow the {} channel.", channel.wire_name());
+        pa_types::pa_println!("Updates now follow the {} channel.", channel.wire_name());
     }
 }
 
@@ -256,16 +256,16 @@ async fn run_check(flag: Option<UpdateChannel>) -> i32 {
     let target = match installer::current_target() {
         Ok(target) => target,
         Err(error) => {
-            eprintln!("Error: {error:#}");
+            pa_types::pa_eprintln!("Error: {error:#}");
             return 1;
         }
     };
     let running = crate::config::version();
     let channel = update_channel(flag);
     let base = installer::download_base_url();
-    println!("Platform: {target}");
-    println!("Running:  {running}");
-    println!("Channel:  {}", channel.wire_name());
+    pa_types::pa_println!("Platform: {target}");
+    pa_types::pa_println!("Running:  {running}");
+    pa_types::pa_println!("Channel:  {}", channel.wire_name());
     let latest = pa_core::update::release::latest_release(
         running,
         Some(channel),
@@ -274,19 +274,19 @@ async fn run_check(flag: Option<UpdateChannel>) -> i32 {
     )
     .await;
     let Ok(Some(latest)) = latest else {
-        eprintln!(
+        pa_types::pa_eprintln!(
             "Error: could not read the {} release manifest at {base}/{}",
             channel.wire_name(),
             channel.manifest_path()
         );
         return 1;
     };
-    println!(
+    pa_types::pa_println!(
         "Latest:   {} ({base}/{})",
         latest.version,
         channel.manifest_path()
     );
-    println!("{}", check_verdict(&latest, running, channel, flag));
+    pa_types::pa_println!("{}", check_verdict(&latest, running, channel, flag));
     0
 }
 

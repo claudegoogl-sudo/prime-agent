@@ -22,9 +22,9 @@ const HANDLED_OK: PackageCommandOutcome = PackageCommandOutcome { exit_code: Non
 
 fn fail(message: &str, hint: Option<&str>) -> PackageCommandOutcome {
     // handlePackageCommand prints its errors without the "Error: " prefix.
-    eprintln!("{message}");
+    pa_types::pa_eprintln!("{message}");
     if let Some(hint) = hint {
-        eprintln!("{hint}");
+        pa_types::pa_eprintln!("{hint}");
     }
     PackageCommandOutcome { exit_code: Some(1) }
 }
@@ -362,16 +362,16 @@ fn parse_package_command(args: &[String]) -> Option<PackageCommandOptions> {
 fn print_package_command_help(command: PackageCommand) {
     let usage = command.usage();
     match command {
-        PackageCommand::Install => println!(
+        PackageCommand::Install => pa_types::pa_println!(
             "Usage:\n  {usage}\n\nInstall a package and add it to settings.\n\nOptions:\n  --local    Install project-locally ({CONFIG_DIR_NAME}/settings.json)\n\nExamples:\n  {APP_NAME} package install npm:@foo/bar\n  {APP_NAME} package install git:github.com/user/repo\n  {APP_NAME} package install git:git@github.com:user/repo\n  {APP_NAME} package install https://github.com/user/repo\n  {APP_NAME} package install ssh://git@github.com/user/repo\n  {APP_NAME} package install ./local/path\n"
         ),
-        PackageCommand::Remove => println!(
+        PackageCommand::Remove => pa_types::pa_println!(
             "Usage:\n  {usage}\n\nRemove a package and its source from settings.\n\nOptions:\n  --local    Remove from project settings ({CONFIG_DIR_NAME}/settings.json)\n\nExamples:\n  {APP_NAME} package remove npm:@foo/bar\n"
         ),
-        PackageCommand::Update => println!(
+        PackageCommand::Update => pa_types::pa_println!(
             "Usage:\n  {usage}\n\nUpdate {APP_NAME} or installed packages.\n\nOptions:\n  --self                  Update {APP_NAME} only\n  --extensions            Update installed packages only\n  --extension <source>    Update one package only\n  --force                 Reinstall {APP_NAME} even if the current version is latest\n  --rollback              Restore the previous compiled release\n  --nightly               Switch updates to the nightly channel (unreleased builds, may be broken)\n  --stable                Return updates to the stable channel\n  --daemon-socket <path>  Restart the daemon listening on this exact socket\n\nCommands:\n  {APP_NAME} update                Update {APP_NAME}\n  {APP_NAME} package update        Update installed packages\n  {APP_NAME} package update <source> Update one package\n"
         ),
-        PackageCommand::List => println!(
+        PackageCommand::List => pa_types::pa_println!(
             "Usage:\n  {usage}\n\nList installed packages from user and project settings.\n"
         ),
     }
@@ -494,7 +494,7 @@ pub fn handle_package_command(args: &[String]) -> PackageCommandOutcome {
     manager.set_progress_callback(Box::new(|event: &ProgressEvent| {
         if event.kind == ProgressEventKind::Start {
             if let Some(message) = &event.message {
-                println!("{message}");
+                pa_types::pa_println!("{message}");
             }
         }
     }));
@@ -511,7 +511,7 @@ pub fn handle_package_command(args: &[String]) -> PackageCommandOutcome {
             let source = options.source.as_deref().expect("checked above");
             match manager.install_and_persist(source, scope) {
                 Ok(()) => {
-                    println!("Installed {source}");
+                    pa_types::pa_println!("Installed {source}");
                     HANDLED_OK
                 }
                 Err(error) => fail(&format!("Error: {error}"), None),
@@ -521,11 +521,11 @@ pub fn handle_package_command(args: &[String]) -> PackageCommandOutcome {
             let source = options.source.as_deref().expect("checked above");
             match manager.remove_and_persist(source, scope) {
                 Ok(true) => {
-                    println!("Removed {source}");
+                    pa_types::pa_println!("Removed {source}");
                     HANDLED_OK
                 }
                 Ok(false) => {
-                    eprintln!("No matching package found for {source}");
+                    pa_types::pa_eprintln!("No matching package found for {source}");
                     PackageCommandOutcome { exit_code: Some(1) }
                 }
                 Err(error) => fail(&format!("Error: {error}"), None),
@@ -584,8 +584,8 @@ fn run_package_update(
             return fail(&format!("Error: {error}"), None);
         }
         match update_source {
-            Some(source) => println!("Updated {source}"),
-            None => println!("Updated packages"),
+            Some(source) => pa_types::pa_println!("Updated {source}"),
+            None => pa_types::pa_println!("Updated packages"),
         }
     }
     if !target.includes_self() {
@@ -611,7 +611,7 @@ fn run_package_update(
 /// Print the configured package list (user section, then project section).
 fn print_package_list(packages: &[pa_core::packages::ConfiguredPackage]) {
     if packages.is_empty() {
-        println!("No packages installed.");
+        pa_types::pa_println!("No packages installed.");
         return;
     }
     let user_packages: Vec<_> = packages
@@ -623,16 +623,16 @@ fn print_package_list(packages: &[pa_core::packages::ConfiguredPackage]) {
         .filter(|package| package.scope == UserOrProject::Project)
         .collect();
     if !user_packages.is_empty() {
-        println!("User packages:");
+        pa_types::pa_println!("User packages:");
         for package in &user_packages {
             print_configured_package(package);
         }
     }
     if !project_packages.is_empty() {
         if !user_packages.is_empty() {
-            println!();
+            pa_types::pa_println!();
         }
-        println!("Project packages:");
+        pa_types::pa_println!("Project packages:");
         for package in &project_packages {
             print_configured_package(package);
         }
@@ -645,9 +645,9 @@ fn print_configured_package(package: &pa_core::packages::ConfiguredPackage) {
     } else {
         package.source.clone()
     };
-    println!("  {display}");
+    pa_types::pa_println!("  {display}");
     if let Some(installed_path) = &package.installed_path {
-        println!("    {}", installed_path.display());
+        pa_types::pa_println!("    {}", installed_path.display());
     }
 }
 
@@ -662,7 +662,7 @@ pub(crate) fn report_settings_errors(
             pa_core::settings::SettingsScope::Global => "global",
             pa_core::settings::SettingsScope::Project => "project",
         };
-        eprintln!("Warning ({context}, {scope} settings): {}", error.message);
+        pa_types::pa_eprintln!("Warning ({context}, {scope} settings): {}", error.message);
     }
 }
 

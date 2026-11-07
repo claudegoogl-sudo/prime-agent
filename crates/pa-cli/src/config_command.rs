@@ -22,7 +22,7 @@ pub fn run() -> i32 {
     let resolved = match manager.resolve() {
         Ok(resolved) => resolved,
         Err(error) => {
-            eprintln!("Error: {error:#}");
+            pa_types::pa_eprintln!("Error: {error:#}");
             return 1;
         }
     };
@@ -47,7 +47,7 @@ pub fn run() -> i32 {
     match run_config_selector(selector, options, &mut on_toggle) {
         Ok(()) => 0,
         Err(error) => {
-            eprintln!("Error: {error:#}");
+            pa_types::pa_eprintln!("Error: {error:#}");
             1
         }
     }
