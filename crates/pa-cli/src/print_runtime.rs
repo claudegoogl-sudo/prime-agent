@@ -1497,7 +1497,7 @@ async fn run_prompts_and_emit(
     let mut unsubscribe: Option<pa_agent::agent::Subscription> = None;
     if json_mode {
         if let Some(header) = session_header_json(engine).await {
-            println!("{header}");
+            println!("{}", pa_types::redact::redact_text(&header)); // PLATFORM-PATCH 7
         }
         unsubscribe = Some(
             engine
@@ -1506,7 +1506,7 @@ async fn run_prompts_and_emit(
                 .subscribe(|event, _signal| {
                     Box::pin(async move {
                         if let Some(json) = agent_event_json(&event) {
-                            println!("{json}");
+                            println!("{}", pa_types::redact::redact_text(&json.to_string())); // PLATFORM-PATCH 7
                         }
                         Ok(())
                     })
@@ -1753,11 +1753,11 @@ async fn run_prompts_and_emit(
         }
         if let Some(primary) = result.primary {
             if let Some(stderr) = primary.stderr_text(&mut exit_code) {
-                eprintln!("{stderr}");
+                eprintln!("{}", pa_types::redact::redact_text(&stderr.to_string())); // PLATFORM-PATCH 7
             }
             if exit_code == 0 {
                 if let Some(text) = primary.stdout_text() {
-                    println!("{text}");
+                    println!("{}", pa_types::redact::redact_text(&text.to_string())); // PLATFORM-PATCH 7
                 }
             }
         }

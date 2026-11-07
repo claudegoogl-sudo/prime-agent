@@ -381,6 +381,27 @@ fn redact_value(v: &mut serde_json::Value, r: &Redactor) -> bool {
     }
 }
 
+/// Sink for plain text / one JSON line without a trailing newline (stdout, stderr, logs).
+/// Fail-closed: returns `[REDACTED:ERROR]` when redaction is unavailable.
+#[must_use]
+pub fn redact_text(text: &str) -> String {
+    let Some(r) = current() else {
+        return "[REDACTED:ERROR]".to_string();
+    };
+    String::from_utf8_lossy(&redact_json_or_text(&r, text.as_bytes())).into_owned()
+}
+
+fn redact_json_or_text(r: &Redactor, b: &[u8]) -> Vec<u8> {
+    if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(b) {
+        if redact_value(&mut v, r) {
+            if let Ok(s) = serde_json::to_vec(&v) {
+                return r.redact(&s);
+            }
+        }
+    }
+    r.redact(b)
+}
+
 /// Sink function for one serialized JSON line (R1): pass 1 on decoded string leaves, pass 2 on
 /// the final bytes. Fail-closed: if redaction is unavailable the record becomes
 /// `{"redacted":"[REDACTED:ERROR]"}` + newline; raw bytes are never returned.
@@ -571,5 +592,13 @@ mod tests {
         assert!(is_failed_closed());
         let again = String::from_utf8(redact_json_line(line.as_bytes())).unwrap();
         assert!(!again.contains(secret));
+    }
+
+    #[test]
+    fn text_sink_redacts_json_and_plain() {
+        reload([("TEXT_SINK_TOKEN".to_string(), "text-secret-VALUE-77".to_string())], None).unwrap();
+        assert_eq!(redact_text("a text-secret-VALUE-77 b"), "a [REDACTED:TEXT_SINK_TOKEN] b");
+        let j = redact_text("{\"k\":\"text-secret-VALUE-77\"}");
+        assert!(!j.contains("text-secret-VALUE-77") && j.contains("REDACTED"));
     }
 }
