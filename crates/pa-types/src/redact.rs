@@ -8,6 +8,10 @@ use std::fmt::Write as _;
 
 /// Shortest accepted needle for filter-named env vars and the needles file (shorter => refuse).
 pub const MIN_NEEDLE_LEN: usize = 4;
+/// Env-derived values shorter than this are skipped (name-only), and pass 2 (raw serialized
+/// bytes) only uses variants at least this long so JSON structure like `true`/`null` is safe.
+pub const MIN_ENV_NEEDLE_LEN: usize = 8;
+pub const MIN_STRUCTURAL_VARIANT_LEN: usize = 8;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RedactError {
@@ -129,6 +133,9 @@ pub fn variants(value: &str) -> Vec<Vec<u8>> {
 pub struct Redactor {
     ac: AhoCorasick,
     names: Vec<String>, // per pattern index
+    /// Same patterns restricted to variants >= MIN_STRUCTURAL_VARIANT_LEN (pass 2 on JSON lines).
+    ac_structural: AhoCorasick,
+    names_structural: Vec<String>,
     max_len: usize,
 }
 
@@ -150,16 +157,45 @@ impl Redactor {
             }
         }
         let max_len = patterns.iter().map(Vec::len).max().unwrap_or(0);
-        let ac = AhoCorasick::builder()
-            .match_kind(MatchKind::LeftmostLongest)
-            .build(&patterns)
-            .map_err(|_| RedactError::Build)?;
-        Ok(Self { ac, names, max_len })
+        let build = |pats: &[Vec<u8>]| {
+            AhoCorasick::builder()
+                .match_kind(MatchKind::LeftmostLongest)
+                .build(pats)
+                .map_err(|_| RedactError::Build)
+        };
+        let ac = build(&patterns)?;
+        let mut sp = Vec::new();
+        let mut sn = Vec::new();
+        for (p, n) in patterns.iter().zip(&names) {
+            if p.len() >= MIN_STRUCTURAL_VARIANT_LEN {
+                sp.push(p.clone());
+                sn.push(n.clone());
+            }
+        }
+        let ac_structural = build(&sp)?;
+        Ok(Self { ac, names, ac_structural, names_structural: sn, max_len })
     }
 
     #[must_use]
     pub fn max_needle_len(&self) -> usize {
         self.max_len
+    }
+
+    /// Like [`redact`](Self::redact) but only variants >= MIN_STRUCTURAL_VARIANT_LEN (safe to run
+    /// over serialized JSON without damaging structure).
+    #[must_use]
+    pub fn redact_structural(&self, input: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(input.len());
+        let mut last = 0;
+        for m in self.ac_structural.find_iter(input) {
+            out.extend_from_slice(&input[last..m.start()]);
+            out.extend_from_slice(
+                format!("[REDACTED:{}]", self.names_structural[m.pattern().as_usize()]).as_bytes(),
+            );
+            last = m.end();
+        }
+        out.extend_from_slice(&input[last..]);
+        out
     }
 
     /// Replace every match with `[REDACTED:<NAME>]` (leftmost-longest).
@@ -323,7 +359,11 @@ pub fn reload(
     needles_file: Option<&std::path::Path>,
 ) -> Result<(), String> {
     let result = (|| {
-        let mut needles = needles_from_env(vars);
+        // Env-derived values below the floor are skipped (name-only), never fatal (R-C).
+        let mut needles: Vec<(String, String)> = needles_from_env(vars)
+            .into_iter()
+            .filter(|(_, v)| v.len() >= MIN_ENV_NEEDLE_LEN)
+            .collect();
         #[cfg(unix)]
         if let Some(p) = needles_file {
             needles.extend(read_needles_file(p).map_err(str::to_string)?);
@@ -358,10 +398,19 @@ pub fn reload_from_process_env() -> Result<(), String> {
 }
 
 fn current() -> Option<Arc<Redactor>> {
-    if global().read().ok()?.redactor.is_none() && !is_failed_closed() {
+    let (empty, failed) = {
+        let g = global().read().ok()?;
+        (g.redactor.is_none(), g.failed)
+    }; // read guard dropped before any reload (R-D)
+    if empty && !failed {
         let _ = reload_from_process_env();
     }
-    global().read().ok()?.redactor.clone()
+    let g = global().read().ok()?;
+    // Deny-all while failed (R-B): a rotated secret must never be written raw.
+    if g.failed {
+        return None;
+    }
+    g.redactor.clone()
 }
 
 fn redact_value(v: &mut serde_json::Value, r: &Redactor) -> bool {
@@ -400,13 +449,29 @@ pub fn redact_text(text: &str) -> String {
 
 fn redact_json_or_text(r: &Redactor, b: &[u8]) -> Vec<u8> {
     if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(b) {
-        if redact_value(&mut v, r) {
-            if let Ok(s) = serde_json::to_vec(&v) {
-                return r.redact(&s);
+        if matches!(v, serde_json::Value::Object(_) | serde_json::Value::Array(_)) {
+            if redact_value(&mut v, r) {
+                if let Ok(s) = serde_json::to_vec(&v) {
+                    return r.redact_structural(&s);
+                }
             }
+            return r.redact_structural(b);
         }
     }
+    // Plain text: every variant applies.
     r.redact(b)
+}
+
+/// `println!` through the redaction sink (stdout). Use instead of `println!` in output paths.
+#[macro_export]
+macro_rules! pa_println {
+    ($($t:tt)*) => { println!("{}", $crate::redact::redact_text(&format!($($t)*))) };
+}
+
+/// `eprintln!` through the redaction sink (stderr).
+#[macro_export]
+macro_rules! pa_eprintln {
+    ($($t:tt)*) => { eprintln!("{}", $crate::redact::redact_text(&format!($($t)*))) };
 }
 
 /// Sink function for one serialized JSON line (R1): pass 1 on decoded string leaves, pass 2 on
@@ -428,7 +493,7 @@ pub fn redact_json_line(line: &[u8]) -> Vec<u8> {
             }
         }
     }
-    r.redact(&bytes)
+    r.redact_structural(&bytes)
 }
 
 #[cfg(test)]
@@ -594,11 +659,36 @@ mod tests {
         assert!(!out.contains(secret), "{out}");
         assert!(out.contains("[REDACTED:SINK_TEST_TOKEN]"));
         assert!(out.ends_with('\n'));
-        // A too-short needle makes the rebuild fail: old matcher stays, flag is set.
-        assert!(reload([("BAD_TOKEN".to_string(), "abc".to_string())], None).is_err());
+        // R-C: short env values are skipped, not fatal; structural words survive.
+        reload([("SHORT_TOKEN".to_string(), "true".to_string()), ("SINK_TEST_TOKEN".to_string(), secret.to_string())], None).unwrap();
+        assert!(!is_failed_closed());
+        let tl = String::from_utf8(redact_json_line(b"{\"ok\":true,\"v\":null}\n")).unwrap();
+        assert_eq!(tl, "{\"ok\":true,\"v\":null}\n");
+        // R-B: a failed reload denies everything (no raw output with a stale matcher).
+        assert!(reload([], Some(std::path::Path::new("/nonexistent/needles"))).is_err());
         assert!(is_failed_closed());
         let again = String::from_utf8(redact_json_line(line.as_bytes())).unwrap();
-        assert!(!again.contains(secret));
+        assert!(again.contains("[REDACTED:ERROR]") && !again.contains(secret));
+        assert_eq!(redact_text("anything"), "[REDACTED:ERROR]");
+        // Recovery after a good reload.
+        reload([("SINK_TEST_TOKEN".to_string(), secret.to_string())], None).unwrap();
+        assert!(!is_failed_closed());
+        // R-D: concurrent readers while reloading must not deadlock.
+        let hs: Vec<_> = (0..8)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    for _ in 0..200 {
+                        let _ = redact_text("x");
+                    }
+                })
+            })
+            .collect();
+        for _ in 0..50 {
+            reload([("SINK_TEST_TOKEN".to_string(), "line-secret-VALUE-0042".to_string())], None).unwrap();
+        }
+        for h in hs {
+            h.join().unwrap();
+        }
     }
 
     #[test]

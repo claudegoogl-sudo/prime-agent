@@ -66,7 +66,7 @@ impl TurnBoundary {
             assistant_turns_since_review: 0,
             entry_baseline: None,
             json_mode,
-            sink: std::sync::Arc::new(|event| println!("{}", pa_types::redact::redact_text(&event.to_string()))) // PLATFORM-PATCH 7,
+            sink: std::sync::Arc::new(|event| pa_types::pa_println!("{event}")),
         }
     }
 

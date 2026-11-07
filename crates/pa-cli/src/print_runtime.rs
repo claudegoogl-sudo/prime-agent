@@ -26,7 +26,7 @@ impl crate::mode::Runtime for PrintRuntime {
             return match crate::list_models::run(options) {
                 Ok(code) => Ok(code),
                 Err(message) => {
-                    eprintln!("Error: {message}");
+                    pa_types::pa_eprintln!("Error: {message}");
                     Ok(1)
                 }
             };
@@ -37,14 +37,14 @@ impl crate::mode::Runtime for PrintRuntime {
             AppMode::Print | AppMode::Json => match run_print_mode(options) {
                 Ok(code) => Ok(code),
                 Err(message) => {
-                    eprintln!("Error: {message}");
+                    pa_types::pa_eprintln!("Error: {message}");
                     Ok(1)
                 }
             },
             AppMode::Interactive => match crate::interactive_mode::run_interactive_mode(options) {
                 Ok(code) => Ok(code),
                 Err(error) => {
-                    eprintln!("Error: {error:#}");
+                    pa_types::pa_eprintln!("Error: {error:#}");
                     Ok(1)
                 }
             },
@@ -52,7 +52,7 @@ impl crate::mode::Runtime for PrintRuntime {
                 match crate::daemon_mode::run_daemon_mode(options.daemon_socket.as_deref()) {
                     Ok(code) => Ok(code),
                     Err(error) => {
-                        eprintln!("Error: {error:#}");
+                        pa_types::pa_eprintln!("Error: {error:#}");
                         Ok(1)
                     }
                 }
@@ -62,14 +62,14 @@ impl crate::mode::Runtime for PrintRuntime {
             AppMode::Acp => match run_acp_mode(options) {
                 Ok(code) => Ok(code),
                 Err(error) => {
-                    eprintln!("Error: {error:#}");
+                    pa_types::pa_eprintln!("Error: {error:#}");
                     Ok(1)
                 }
             },
             AppMode::Rpc => match run_rpc_mode(options) {
                 Ok(code) => Ok(code),
                 Err(error) => {
-                    eprintln!("Error: {error:#}");
+                    pa_types::pa_eprintln!("Error: {error:#}");
                     Ok(1)
                 }
             },
@@ -1133,7 +1133,7 @@ async fn select_model(
         {
             return Ok(model);
         }
-        eprintln!("Could not restore model {provider}/{model_id}");
+        pa_types::pa_eprintln!("Could not restore model {provider}/{model_id}");
     }
     // A missed restore's readiness window may have refreshed the catalog, so
     // the defaults chain resolves against the refreshed view.
@@ -1334,7 +1334,7 @@ fn lease_fresh_manager(
             ) {
                 Ok(lease) => Some(lease),
                 Err(error) => {
-                    eprintln!("prime-agent: could not lease the fresh session file: {error:#}");
+                    pa_types::pa_eprintln!("prime-agent: could not lease the fresh session file: {error:#}");
                     None
                 }
             }
@@ -1497,7 +1497,7 @@ async fn run_prompts_and_emit(
     let mut unsubscribe: Option<pa_agent::agent::Subscription> = None;
     if json_mode {
         if let Some(header) = session_header_json(engine).await {
-            println!("{}", pa_types::redact::redact_text(&header)); // PLATFORM-PATCH 7
+            pa_types::pa_println!("{header}");
         }
         unsubscribe = Some(
             engine
@@ -1506,7 +1506,7 @@ async fn run_prompts_and_emit(
                 .subscribe(|event, _signal| {
                     Box::pin(async move {
                         if let Some(json) = agent_event_json(&event) {
-                            println!("{}", pa_types::redact::redact_text(&json.to_string())); // PLATFORM-PATCH 7
+                            pa_types::pa_println!("{json}");
                         }
                         Ok(())
                     })
@@ -1641,7 +1641,7 @@ async fn run_prompts_and_emit(
     // The rejected prompt wait: print the raw command error to stderr and
     // exit 1 — no later prompts ran, and the disposal drain still runs.
     if let Some(error) = command_failure {
-        eprintln!("{error}");
+        pa_types::pa_eprintln!("{error}");
         goal_accounting.unsubscribe().await;
         accounting.unsubscribe().await;
         if let Some(subscription) = unsubscribe {
@@ -1748,21 +1748,21 @@ async fn run_prompts_and_emit(
             && goal.last_error.as_deref() == Some(cap_reason)
             && goal.updated_at != goal_updated_at_start
         {
-            eprintln!("{cap_reason}");
+            pa_types::pa_eprintln!("{cap_reason}");
             exit_code = 1;
         }
         if let Some(primary) = result.primary {
             if let Some(stderr) = primary.stderr_text(&mut exit_code) {
-                eprintln!("{}", pa_types::redact::redact_text(&stderr.to_string())); // PLATFORM-PATCH 7
+                pa_types::pa_eprintln!("{stderr}");
             }
             if exit_code == 0 {
                 if let Some(text) = primary.stdout_text() {
-                    println!("{}", pa_types::redact::redact_text(&text.to_string())); // PLATFORM-PATCH 7
+                    pa_types::pa_println!("{text}");
                 }
             }
         }
         for outcome in result.compaction_outcomes {
-            eprintln!("{}", outcome.content);
+            pa_types::pa_eprintln!("{}", outcome.content);
             if outcome.outcome == "failed" {
                 exit_code = 1;
             }
@@ -1770,7 +1770,7 @@ async fn run_prompts_and_emit(
     }
     // The autonomous contract applies to both output modes.
     if let Some(stderr) = autonomous.exit_stderr().await {
-        eprintln!("{stderr}");
+        pa_types::pa_eprintln!("{stderr}");
         exit_code = 1;
     }
     // The disposal order: the exit code first, then the teardown drains a
