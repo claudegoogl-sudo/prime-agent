@@ -113,7 +113,8 @@ pub fn write_rlm_subagent_display(entry: &RlmSubagentDisplayEntry) -> Result<boo
     options.create(true).write(true).truncate(true);
     pa_core::platform::perms::set_private_mode(&mut options);
     let mut file = options.open(&temp)?;
-    file.write_all(format!("{payload}\n").as_bytes())?;
+    // R-A: prompt/spawn_code are content-bearing; redact before bytes reach disk (fail closed).
+    file.write_all(&pa_types::redact::redact_json_line(format!("{payload}\n").as_bytes()))?;
     // TS `writeFileAtomicSync(..., { fsync: true })`: the temp is durable
     // before the rename, so a crash mid-write leaves a stale temp and the
     // previous file intact - never a half-written display state.
@@ -172,4 +173,34 @@ pub(crate) fn read_legacy_registry(session_file: &Path) -> Vec<LegacyRlmSubagent
         latest.insert(entry.child_id.clone(), entry);
     }
     latest.into_values().collect()
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn display_file_never_holds_needle() {
+        const SECRET: &str = "Zq9-needle-value-4711";
+        pa_types::redact::reload(
+            vec![("TEST_API_KEY".to_string(), SECRET.to_string())],
+            None,
+        )
+        .unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let hex: String = SECRET.bytes().map(|b| format!("{b:02x}")).collect();
+        let entry = RlmSubagentDisplayEntry {
+            type_tag: "rlm_subagent".into(),
+            session_dir: tmp.path().to_string_lossy().into_owned(),
+            prompt: Some(format!("use {SECRET} and {hex}")),
+            spawn_code: Some(format!("k='{SECRET}'")),
+            status: "running".into(),
+            ..serde_json::from_str("{}").unwrap()
+        };
+        write_rlm_subagent_display(&entry).unwrap();
+        for e in std::fs::read_dir(tmp.path()).unwrap() {
+            let b = std::fs::read_to_string(e.unwrap().path()).unwrap();
+            assert!(!b.contains(SECRET) && !b.contains(&hex), "needle on disk");
+        }
+    }
 }
