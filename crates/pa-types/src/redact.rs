@@ -180,14 +180,14 @@ impl Redactor {
 /// Per-stream, per-sink redactor that holds back the last `max_len - 1` bytes so a secret split
 /// across chunks is still matched. Held bytes are NEVER released raw: dropping the stream
 /// (error, cancel, panic, signal) discards them; only [`finish`](Self::finish) flushes (redacted).
-pub struct StreamRedactor<'a> {
-    r: &'a Redactor,
+pub struct StreamRedactor {
+    r: Arc<Redactor>,
     held: Vec<u8>,
 }
 
-impl<'a> StreamRedactor<'a> {
+impl StreamRedactor {
     #[must_use]
-    pub fn new(r: &'a Redactor) -> Self {
+    pub fn new(r: Arc<Redactor>) -> Self {
         Self { r, held: Vec::new() }
     }
 
@@ -381,6 +381,13 @@ fn redact_value(v: &mut serde_json::Value, r: &Redactor) -> bool {
     }
 }
 
+/// A stream sink on the process matcher, or `None` when redaction is unavailable (fail closed:
+/// the caller must then write nothing raw).
+#[must_use]
+pub fn stream() -> Option<StreamRedactor> {
+    current().map(StreamRedactor::new)
+}
+
 /// Sink for plain text / one JSON line without a trailing newline (stdout, stderr, logs).
 /// Fail-closed: returns `[REDACTED:ERROR]` when redaction is unavailable.
 #[must_use]
@@ -522,18 +529,18 @@ mod tests {
 
     #[test]
     fn stream_split_across_chunks_and_drop_never_releases_raw() {
-        let r = red();
+        let r = Arc::new(red());
         let bytes = format!("pre {SECRET} post");
         for split in 1..bytes.len() {
             let (a, b) = bytes.as_bytes().split_at(split);
-            let mut s = StreamRedactor::new(&r);
+            let mut s = StreamRedactor::new(r.clone());
             let mut out = s.push(a);
             out.extend(s.push(b));
             out.extend(s.finish());
             assert_eq!(String::from_utf8(out).unwrap(), "pre [REDACTED:MY_API_KEY] post", "split {split}");
         }
         // Killed mid-stream: whatever was released contains no raw secret prefix beyond max_len-1.
-        let mut s = StreamRedactor::new(&r);
+        let mut s = StreamRedactor::new(r.clone());
         let released = s.push(format!("zzzzzzzzzz{}", &SECRET[..10]).as_bytes());
         drop(s);
         assert!(!String::from_utf8_lossy(&released).contains(&SECRET[..10]));

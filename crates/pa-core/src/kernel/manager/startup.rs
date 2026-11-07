@@ -374,31 +374,50 @@ impl Inner {
                     pending.clear();
                     decoded
                 };
+                // PLATFORM-PATCH 7: kernel stderr goes through a per-stream redactor (secrets
+                // split across reads are held back); fail closed when redaction is unavailable.
+                let mut sink = pa_types::redact::stream();
+                let mut write_log = |log: &Option<Arc<Mutex<StderrLog>>>, bytes: &[u8]| {
+                    if let Some(log) = log {
+                        let mut log = lock(log);
+                        let n = bytes.len() as u64;
+                        if log.budget >= n {
+                            let _ = log.file.write_all(bytes);
+                            let _ = log.file.flush();
+                            log.budget -= n;
+                        } else if log.budget > 0 {
+                            let _ = log.file.write_all(KERNEL_STDERR_LOG_BUDGET_MARKER.as_bytes());
+                            let _ = log.file.flush();
+                            log.budget = 0;
+                        }
+                    }
+                };
                 loop {
                     match reader.read(&mut buffer).await {
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
-                            pending.extend_from_slice(&buffer[..n]);
+                            let safe: Vec<u8> = match sink.as_mut() {
+                                Some(s) => s.push(&buffer[..n]),
+                                None => b"[REDACTED:ERROR]\n".to_vec(),
+                            };
+                            if safe.is_empty() {
+                                continue;
+                            }
+                            pending.extend_from_slice(&safe);
                             let decoded = decode(&mut pending);
                             let Some(inner) = inner.upgrade() else {
                                 break;
                             };
                             inner.append_kernel_stderr_text(&decoded);
-                            if let Some(log) = &log {
-                                let mut log = lock(log);
-                                if log.budget >= n as u64 {
-                                    let _ = log.file.write_all(&buffer[..n]);
-                                    let _ = log.file.flush();
-                                    log.budget -= n as u64;
-                                } else if log.budget > 0 {
-                                    let _ = log
-                                        .file
-                                        .write_all(KERNEL_STDERR_LOG_BUDGET_MARKER.as_bytes());
-                                    let _ = log.file.flush();
-                                    log.budget = 0;
-                                }
-                            }
+                            write_log(&log, &safe);
                         }
+                    }
+                }
+                if let Some(s) = sink.take() {
+                    let rest = s.finish();
+                    if !rest.is_empty() {
+                        pending.extend_from_slice(&rest);
+                        write_log(&log, &rest);
                     }
                 }
                 if let Some(inner) = inner.upgrade() {

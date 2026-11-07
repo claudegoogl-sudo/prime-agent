@@ -1665,6 +1665,7 @@ dependencies = [
 name = "pa-types"
 version = "0.10.2"
 dependencies = [
+ "aho-corasick",
  "anyhow",
  "libc",
  "regex",
