@@ -585,6 +585,7 @@ impl ReplKernelManager {
         let hard = platform_hard_cell_timeout(
             opts.cell_timeout_ms,
             std::env::var("PRIME_AGENT_PLATFORM_HARD_CELL_ABORT").ok().as_deref(),
+            std::env::var("PRIME_AGENT_PLATFORM_HARD_CELL_ABORT_MS").ok().as_deref(),
         );
         self.execute_bounded(code, opts, hard).await
     }
@@ -1000,11 +1001,22 @@ impl ReplKernelManager {
 /// PLATFORM-PATCH 12: when `PRIME_AGENT_PLATFORM_HARD_CELL_ABORT=1`, the
 /// per-cell budget (`pythonCellTimeoutMs`, `0` = off) also aborts the cell
 /// (interrupt + grace) instead of only adding a stderr note.
-pub(crate) fn platform_hard_cell_timeout(budget_ms: Option<u64>, flag: Option<&str>) -> Option<u64> {
+///
+/// `PRIME_AGENT_PLATFORM_HARD_CELL_ABORT_MS` (positive integer) is the abort
+/// budget on its own. Print/`--mode json` sessions are daemonless and carry no
+/// watchdog budget (`arm_cell_timeout_ms` is `None`), so the settings value
+/// alone never reached them (PLA-12158 F4). Without the override the settings
+/// budget is used as before.
+pub(crate) fn platform_hard_cell_timeout(
+    budget_ms: Option<u64>,
+    flag: Option<&str>,
+    override_ms: Option<&str>,
+) -> Option<u64> {
     if flag != Some("1") {
         return None;
     }
-    budget_ms.filter(|ms| *ms > 0)
+    let over = override_ms.and_then(|v| v.trim().parse::<u64>().ok()).filter(|ms| *ms > 0);
+    over.or_else(|| budget_ms.filter(|ms| *ms > 0))
 }
 
 #[cfg(test)]
@@ -1013,13 +1025,16 @@ mod platform_patch_12_tests {
 
     #[test]
     fn hard_abort_is_opt_in_and_uses_the_cell_budget() {
-        assert_eq!(platform_hard_cell_timeout(Some(3_000_000), None), None);
-        assert_eq!(platform_hard_cell_timeout(Some(3_000_000), Some("0")), None);
-        assert_eq!(platform_hard_cell_timeout(Some(0), Some("1")), None);
-        assert_eq!(platform_hard_cell_timeout(None, Some("1")), None);
+        assert_eq!(platform_hard_cell_timeout(Some(3_000_000), None, None), None);
+        assert_eq!(platform_hard_cell_timeout(Some(3_000_000), Some("0"), None), None);
+        assert_eq!(platform_hard_cell_timeout(Some(0), Some("1"), None), None);
+        assert_eq!(platform_hard_cell_timeout(None, Some("1"), None), None);
         assert_eq!(
-            platform_hard_cell_timeout(Some(3_000_000), Some("1")),
+            platform_hard_cell_timeout(Some(3_000_000), Some("1"), None),
             Some(3_000_000)
         );
+        assert_eq!(platform_hard_cell_timeout(None, Some("1"), Some("15000")), Some(15_000));
+        assert_eq!(platform_hard_cell_timeout(Some(9), Some("1"), Some("x")), Some(9));
+        assert_eq!(platform_hard_cell_timeout(None, None, Some("15000")), None);
     }
 }
