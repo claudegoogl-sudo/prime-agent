@@ -587,7 +587,20 @@ impl ReplKernelManager {
             std::env::var("PRIME_AGENT_PLATFORM_HARD_CELL_ABORT").ok().as_deref(),
             std::env::var("PRIME_AGENT_PLATFORM_HARD_CELL_ABORT_MS").ok().as_deref(),
         );
-        self.execute_bounded(code, opts, hard).await
+        let user_signal = opts.signal.clone();
+        let mut result = self.execute_bounded(code, opts, hard).await?;
+        // PLATFORM-PATCH 12b (PLA-12161 F5): a budget abort must read as an error.
+        if let Some(text) = platform_timeout_text(
+            result.status,
+            hard,
+            user_signal.as_ref().is_some_and(|s| s.is_aborted()),
+        ) {
+            if !result.stderr.is_empty() && !result.stderr.ends_with('\n') {
+                result.stderr.push('\n');
+            }
+            result.stderr.push_str(&text);
+        }
+        Ok(result)
     }
 
     /// The bounded entry onto the shared execute path: the provisioner's
@@ -1019,9 +1032,35 @@ pub(crate) fn platform_hard_cell_timeout(
     over.or_else(|| budget_ms.filter(|ms| *ms > 0))
 }
 
+/// PLATFORM-PATCH 12b: text for a cell the hard budget aborted (not a user abort).
+pub(crate) fn platform_timeout_text(
+    status: ExecuteStatus,
+    hard_ms: Option<u64>,
+    user_aborted: bool,
+) -> Option<String> {
+    let ms = hard_ms?;
+    if status != ExecuteStatus::Aborted || user_aborted {
+        return None;
+    }
+    Some(format!(
+        "ToolCallTimeout: python cell exceeded {}s and was interrupted; the kernel is still alive, state kept",
+        ms.div_ceil(1000)
+    ))
+}
+
 #[cfg(test)]
 mod platform_patch_12_tests {
-    use super::platform_hard_cell_timeout;
+    use super::{platform_hard_cell_timeout, platform_timeout_text};
+    use crate::kernel::shared::ExecuteStatus;
+
+    #[test]
+    fn timeout_text_only_for_budget_abort() {
+        let t = platform_timeout_text(ExecuteStatus::Aborted, Some(15_000), false).unwrap();
+        assert!(t.starts_with("ToolCallTimeout: python cell exceeded 15s and was interrupted"));
+        assert!(platform_timeout_text(ExecuteStatus::Aborted, Some(15_000), true).is_none());
+        assert!(platform_timeout_text(ExecuteStatus::Ok, Some(15_000), false).is_none());
+        assert!(platform_timeout_text(ExecuteStatus::Aborted, None, false).is_none());
+    }
 
     #[test]
     fn hard_abort_is_opt_in_and_uses_the_cell_budget() {

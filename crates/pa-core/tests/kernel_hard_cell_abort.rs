@@ -117,6 +117,14 @@ async fn hard_abort_fires_with_env_budget_and_kernel_survives() {
         Err(_) => true,
     };
     assert!(aborted, "cell must not finish ok: {r:?}");
+    // F5: the tool-visible text carries ToolCallTimeout and the budget (2 s).
+    let res = r.as_ref().expect("aborted cell returns a result");
+    assert_eq!(res.status, ExecuteStatus::Aborted);
+    assert!(
+        res.stderr.contains("ToolCallTimeout: python cell exceeded 2s and was interrupted; the kernel is still alive, state kept"),
+        "stderr: {:?}",
+        res.stderr
+    );
     // A following cell must still work (kernel interrupted or restarted).
     let next = manager.execute("1+1", ExecuteOptions::default()).await.expect("next cell");
     assert_eq!(next.status, ExecuteStatus::Ok);
