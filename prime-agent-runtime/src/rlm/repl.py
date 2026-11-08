@@ -789,6 +789,70 @@ def _platform_env_secret_values() -> list[str]:
     ]
 
 
+def _platform_needle_variants(secret: str) -> list[bytes]:
+    import base64
+    import urllib.parse
+
+    raw = secret.encode("utf-8", "ignore")
+    out = {raw, base64.b64encode(raw), base64.urlsafe_b64encode(raw), base64.b64encode(raw).rstrip(b"="),
+           raw.hex().encode(), urllib.parse.quote(secret, safe="").encode(),
+           json.dumps(secret)[1:-1].encode()}
+    for off in (1, 2):  # base64 of the needle embedded at another 3-byte alignment
+        enc = base64.b64encode(b"x" * off + raw).rstrip(b"=")
+        out.add(enc[4:] if off else enc)
+    return [v for v in out if len(v) >= 8]
+
+
+def _platform_load_needles() -> tuple[list[tuple[str, list[bytes]]], bool]:
+    """(needles as (name, byte variants), failed). Failed => file set but unusable."""
+    import base64
+
+    pairs: list[tuple[str, str]] = [
+        (k, v) for k, v in os.environ.items() if len(v) >= 8 and k.upper().endswith(_PLATFORM_ENV_SUFFIXES)
+    ]
+    failed = False
+    path = os.environ.get("PRIME_AGENT_PLATFORM_NEEDLES_FILE", "").strip()
+    if path:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                text = fh.read()
+            try:
+                doc = json.loads(text)
+            except ValueError:
+                doc = None
+            if doc is None:
+                entries = [{"name": f"FILE_LINE_{i}", "secret": ln} for i, ln in enumerate(text.splitlines()) if ln]
+            else:
+                entries = doc.get("needles", []) if isinstance(doc, dict) else doc
+            for i, e in enumerate(entries):
+                name = str(e.get("name", f"FILE_ENTRY_{i}"))
+                if "secret" in e:
+                    val = e["secret"]
+                else:
+                    val = base64.b64decode(e["secret_b64"]).decode("utf-8", "ignore")
+                if isinstance(val, str) and len(val) >= 8:
+                    pairs.append((name, val))
+        except Exception as err:  # noqa: BLE001
+            failed = True
+            print(f"prime-agent: snapshot needles file unusable ({type(err).__name__}); skipping non-trivial variables",
+                  file=sys.stderr)
+    seen: set[str] = set()
+    out = []
+    for n, v in pairs:
+        if v in seen:
+            continue
+        seen.add(v)
+        out.append((n, _platform_needle_variants(v)))
+    return out, failed
+
+
+def _platform_blob_needle(blob: bytes, needles: list[tuple[str, list[bytes]]]) -> str | None:
+    for name, variants in needles:
+        if any(v in blob for v in variants):
+            return name
+    return None
+
+
 def _platform_is_secret_var(name: str, value: Any, secret_values: list[str]) -> bool:
     if isinstance(value, bytes):
         try:
@@ -812,6 +876,7 @@ def _snapshot_state(
     import datetime
 
     platform_secret_values = _platform_env_secret_values()
+    platform_needles, platform_needles_failed = _platform_load_needles()
     try:
         import dill
     except Exception as err:  # noqa: BLE001 - dill is provisioned by the host, not a hard dep
@@ -882,6 +947,9 @@ def _snapshot_state(
                     if _platform_is_secret_var(name, value, platform_secret_values):
                         skipped.append({"name": name, "reason": "secret variable"})
                         continue
+                    if platform_needles_failed and not (value is None or isinstance(value, (bool, int, float))):
+                        skipped.append({"name": name, "reason": "needles file unreadable (fail closed)"})
+                        continue
                     # Record header: 4-byte name length + 8-byte blob length, plus the name itself.
                     budget = max_bytes - total - 12 - len(encoded)
                     # Prune mode measures at the full per-variable cap: only that cap decides
@@ -901,6 +969,11 @@ def _snapshot_state(
                         continue
                     except Exception as err:  # noqa: BLE001 - one unpicklable name must not abort the snapshot
                         skipped.append({"name": name, "reason": f"{type(err).__name__}: {_safe_str(err)[:200]}"})
+                        continue
+                    hit = _platform_blob_needle(blob, platform_needles) if platform_needles else None
+                    if hit is not None:
+                        print(f"prime-agent: snapshot dropped variable {name!r}: contains needle {hit}", file=sys.stderr)
+                        skipped.append({"name": name, "reason": "secret variable"})
                         continue
                     if total + 12 + len(encoded) + len(blob) > max_bytes:
                         # Only reachable in prune mode, where the measurement cap ignores the budget.

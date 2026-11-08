@@ -39,6 +39,44 @@ class PlatformSnapshotTests(unittest.TestCase):
 
         self.assertIn("secret variable", text)
 
+    def _needles(self, entries):
+        import json
+        d = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        f = os.path.join(d, "n.json")
+        with open(f, "w") as fh:
+            json.dump({"needles": entries}, fh)
+        return f
+
+    def test_needles_file_drops_data_borne_secrets(self):
+        import base64
+        sec = "bt-Syn7h3tic-value-42"
+        f = self._needles([{"name": "BURST_TEST_SECRET", "secret": sec},
+                           {"name": "B64", "secret_b64": base64.b64encode(b"other-secret-9999").decode()},
+                           {"name": "SHORT", "secret": "abc"}])
+        ns = {"plain": {"a": sec}, "nested": {"x": [{"y": ("p", sec)}]},
+              "enc": {"e": base64.b64encode(sec.encode()).decode()},
+              "viaB64": ["other-secret-9999"], "ok": {"k": "harmless abc"}, "n": 3}
+        with mock.patch.dict(os.environ, {"PRIME_AGENT_PLATFORM_NEEDLES_FILE": f}):
+            _, path, manifest = self.snap(ns)
+        blob = open(path, "rb").read()
+        self.assertNotIn(sec.encode(), blob)
+        self.assertNotIn(base64.b64encode(sec.encode()), blob)
+        self.assertNotIn(b"other-secret-9999", blob)
+        text = open(manifest).read()
+        for kept in ('"ok"', '"n"'):
+            self.assertIn(kept, text)
+        for gone in ('"plain"', '"nested"', '"enc"', '"viaB64"'):
+            self.assertIn(gone, text)  # listed under skipped only
+        import json
+        self.assertEqual(json.loads(text)["savedNames"], ["n", "ok"])
+
+    def test_unreadable_needles_file_fails_closed(self):
+        import json
+        with mock.patch.dict(os.environ, {"PRIME_AGENT_PLATFORM_NEEDLES_FILE": "/nonexistent/needles.json"}):
+            _, _, manifest = self.snap({"d": {"a": 1}, "n": 3})
+        self.assertEqual(json.load(open(manifest))["savedNames"], ["n"])
+
     def test_snapshot_files_are_owner_only(self):
         _, path, manifest = self.snap({"n": 1})
         for p in (path, manifest):
