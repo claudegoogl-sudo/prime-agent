@@ -25,7 +25,8 @@ fi
 export HOME="$sandbox/home" \
   PRIME_AGENT_PLATFORM_SOCKET_DIR="$sandbox/s" TMPDIR="$sandbox/t" \
   XDG_CONFIG_HOME="$sandbox/xdg-config" XDG_DATA_HOME="$sandbox/xdg-data" XDG_RUNTIME_DIR="$sandbox/xdg-run"
-mkdir -p "$HOME" "$TMPDIR" "$sandbox/s"
+mkdir -p "$HOME" "$TMPDIR" "$sandbox/s" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$sandbox/home/.ipython"
+chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || { mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"; }
 # Guard: abort if any resolved path is under the real HOME.
 for v in HOME PRIME_AGENT_PLATFORM_SOCKET_DIR TMPDIR; do
   val="${!v}"
