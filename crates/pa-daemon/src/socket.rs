@@ -254,6 +254,15 @@ mod tests {
     use super::*;
     use pa_types::platform::transport::bind_transport;
 
+    /// Temp dir already stamped as this product generation, like a dir the
+    /// daemon has prepared before (the generation guard refuses unmarked dirs
+    /// that already hold sockets/locks).
+    fn marked_dir() -> tempfile::TempDir {
+        let d = tempfile::TempDir::new().unwrap();
+        std::fs::write(d.path().join(crate::platform::GENERATION_MARKER), "rust").unwrap();
+        d
+    }
+
     /// Bind and drop the listener: the socket file outlives the fd with
     /// nobody listening - exactly a crashed worker's residue.
     async fn bind_stale_socket(path: &Path) {
@@ -262,7 +271,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_path_prepares_as_a_no_op() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         prepare_socket_path(&socket).await.unwrap();
         assert!(!socket.exists());
@@ -270,7 +279,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_dangling_symlink_is_rejected_as_not_a_socket() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         std::os::unix::fs::symlink(dir.path().join("missing.sock"), &socket).unwrap();
         let error = prepare_socket_path(&socket).await.unwrap_err();
@@ -280,7 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn non_socket_file_at_the_path_is_refused_and_preserved() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         std::fs::write(&socket, b"not a socket").unwrap();
         let error = prepare_socket_path(&socket).await.unwrap_err();
@@ -290,7 +299,7 @@ mod tests {
 
     #[tokio::test]
     async fn live_listener_is_never_unlinked() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         let listener = bind_transport(&socket).await.unwrap();
         let error = prepare_socket_path(&socket).await.unwrap_err();
@@ -322,7 +331,7 @@ mod tests {
             std::fs::read_link(format!("/proc/self/fd/{fd}")).is_ok()
         }
 
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         let listener = tokio::net::UnixListener::bind(&socket).unwrap();
         // One accepted connection in flight: the client connected, the
@@ -370,7 +379,7 @@ mod tests {
     /// direction: a respawn does not wait out the stale-socket path).
     #[tokio::test]
     async fn exit_cleanup_after_close_spares_a_live_successor_with_a_matching_identity() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         // The owner's own bind, closed exactly like the exit sequences
         // close it before their cleanup.
@@ -402,7 +411,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn exit_cleanup_after_close_unlinks_the_dead_still_ours_file() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         let owner = bind_transport(&socket).await.unwrap();
         let identity = socket_identity(&socket).unwrap();
@@ -417,7 +426,7 @@ mod tests {
     #[cfg(not(target_os = "linux"))]
     #[tokio::test]
     async fn exit_cleanup_off_linux_preserves_the_dead_file_until_the_next_bind() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         let owner = bind_transport(&socket).await.unwrap();
         let identity = socket_identity(&socket).unwrap();
@@ -439,7 +448,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn exit_cleanup_preserves_a_backlogged_successor_with_a_matching_identity() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         let owner = bind_transport(&socket).await.unwrap();
         drop(owner);
@@ -484,7 +493,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn exit_cleanup_unlinks_a_closed_listener_on_a_long_socket_path() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let deep = dir.path().join("a".repeat(80)).join("b".repeat(80));
         std::fs::create_dir_all(&deep).unwrap();
         let socket = deep.join("daemon.sock");
@@ -497,7 +506,7 @@ mod tests {
 
     #[tokio::test]
     async fn stale_socket_file_is_removed_and_the_path_rebinds() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         bind_stale_socket(&socket).await;
         assert!(socket.exists());
@@ -510,7 +519,7 @@ mod tests {
 
     #[tokio::test]
     async fn unlink_refuses_a_live_listener_even_when_marked_stale() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         let listener = bind_transport(&socket).await.unwrap();
         let stale = socket_identity(&socket).unwrap();
@@ -522,7 +531,7 @@ mod tests {
 
     #[tokio::test]
     async fn unlink_refuses_a_replaced_file_with_a_new_identity() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         bind_stale_socket(&socket).await;
         let stale = socket_identity(&socket).unwrap();
@@ -541,7 +550,7 @@ mod tests {
 
     #[tokio::test]
     async fn unlink_is_a_no_op_when_the_file_is_already_gone() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         unlink_stale_socket(&socket, SocketIdentity { dev: 0, ino: 0 })
             .await
@@ -550,7 +559,7 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_waits_while_a_rival_startup_holds_the_lock() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         bind_stale_socket(&socket).await;
         // A rival startup worker owns the cleanup lock: a fresh empty
@@ -576,7 +585,7 @@ mod tests {
 
     #[test]
     fn cleanup_is_deferred_while_a_rival_holds_the_lock() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         let identity = socket_identity(&socket).unwrap();
@@ -592,7 +601,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_stale_cleanup_lock_of_a_crashed_holder_is_reclaimed() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = marked_dir();
         let socket = dir.path().join("daemon.sock");
         bind_stale_socket(&socket).await;
         let crashed_lock = dir.path().join("daemon.sock.lock");
