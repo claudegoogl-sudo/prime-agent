@@ -284,6 +284,71 @@ impl StreamRedactor {
 /// Needles file limits.
 pub const NEEDLES_FILE_MAX_BYTES: u64 = 64 * 1024;
 pub const NEEDLES_FILE_MAX_LINES: usize = 256;
+/// JSON needles file (Platform `gen-redact-needles.py` shape) limits.
+pub const NEEDLES_JSON_MAX_BYTES: u64 = 2 * 1024 * 1024;
+pub const NEEDLES_JSON_MAX_ENTRIES: usize = 8192;
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for c in s.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' | b'-' => 62,
+            b'/' | b'_' => 63,
+            b'=' | b'\n' | b'\r' => continue,
+            _ => return None,
+        };
+        acc = (acc << 6) | u32::from(v);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(u8::try_from((acc >> bits) & 0xff).ok()?);
+        }
+    }
+    Some(out)
+}
+
+/// Parse the JSON needles shape `{"needles":[{"name":..,"secret"|"secret_b64":..}]}` (a bare
+/// array is accepted too). Returns `None` when the text is not that shape. Content-free errors.
+fn parse_needles_json(text: &str) -> Option<Result<Vec<(String, String)>, &'static str>> {
+    let t = text.trim_start();
+    if !t.starts_with('{') && !t.starts_with('[') {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(t).ok()?;
+    let arr = match &v {
+        serde_json::Value::Object(o) => o.get("needles")?.as_array()?,
+        serde_json::Value::Array(a) => a,
+        _ => return None,
+    };
+    if arr.len() > NEEDLES_JSON_MAX_ENTRIES {
+        return Some(Err("needles file has too many entries"));
+    }
+    let mut out = Vec::new();
+    for (i, e) in arr.iter().enumerate() {
+        let name = e
+            .get("name")
+            .and_then(|n| n.as_str())
+            .map_or_else(|| format!("FILE_ENTRY_{}", i + 1), str::to_string);
+        let val = if let Some(s) = e.get("secret").and_then(|x| x.as_str()) {
+            s.to_string()
+        } else if let Some(b) = e.get("secret_b64").and_then(|x| x.as_str()) {
+            match b64_decode(b).and_then(|raw| String::from_utf8(raw).ok()) {
+                Some(s) => s,
+                None => continue,
+            }
+        } else {
+            continue;
+        };
+        if !val.is_empty() {
+            out.push((name, val));
+        }
+    }
+    Some(Ok(out))
+}
 
 /// Needles from env: every var whose name the shared filter blocks or that ends in a secret
 /// suffix (this includes allowlisted keys such as `PAPERCLIP_API_KEY`) and has a non-empty value.
@@ -370,13 +435,19 @@ pub fn read_needles_file(path: &std::path::Path) -> Result<Vec<(String, String)>
     if meta.uid() != unsafe { libc::geteuid() } {
         return Err("needles file has the wrong owner");
     }
-    if meta.len() > NEEDLES_FILE_MAX_BYTES {
+    if meta.len() > NEEDLES_JSON_MAX_BYTES {
         return Err("needles file is too large");
     }
     let mut text = String::new();
-    f.take(NEEDLES_FILE_MAX_BYTES + 1)
+    f.take(NEEDLES_JSON_MAX_BYTES + 1)
         .read_to_string(&mut text)
         .map_err(|_| "needles file is not valid UTF-8")?;
+    if let Some(r) = parse_needles_json(&text) {
+        return r;
+    }
+    if text.len() as u64 > NEEDLES_FILE_MAX_BYTES {
+        return Err("needles file is too large");
+    }
     let mut out = Vec::new();
     for (i, line) in text.lines().enumerate() {
         if i >= NEEDLES_FILE_MAX_LINES {
@@ -823,6 +894,29 @@ mod tests {
         ]);
         let names: Vec<_> = n.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(names, vec!["PAPERCLIP_API_KEY", "db_password"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn needles_file_accepts_platform_json_shape() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("n.json");
+        let mut ents = String::new();
+        for i in 0..600 {
+            // "c2VjcmV0LXZhbHVlLQ==" = "secret-value-"
+            ents.push_str(&format!(
+                r#"{{"name":"K{i}","secret_b64":"c2VjcmV0LXZhbHVlLQ==","last_seen":1}},"#
+            ));
+        }
+        ents.push_str(r#"{"name":"PLAIN","secret":"plain-secret-1","last_seen":2}"#);
+        let body = format!(r#"{{"_warning":"w","source":"s","generated":1,"needles":[{ents}]}}"#);
+        std::fs::write(&f, body).unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let n = read_needles_file(&f).unwrap();
+        assert_eq!(n.len(), 601);
+        assert_eq!(n[0], ("K0".to_string(), "secret-value-".to_string()));
+        assert_eq!(n[600].1, "plain-secret-1");
     }
 
     #[cfg(unix)]
