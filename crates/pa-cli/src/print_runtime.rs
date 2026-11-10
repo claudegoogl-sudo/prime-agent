@@ -450,6 +450,9 @@ async fn print_mode_main(
     // No inline descendant outlives the print process: kernels get their
     // final snapshot, drivers join, runs abort (every exit path).
     crate::print_rlm::dispose_inline_subagents(&root_node).await;
+    // PLATFORM-PATCH 14 (PLA-12397): the root kernel gets its final namespace snapshot too, so a
+    // `--resume` in a new process revives the variables (the Node runtime does this on exit).
+    engine.dispose_kernel().await;
     exit
 }
 
