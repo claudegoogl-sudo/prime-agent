@@ -15,9 +15,12 @@ fi
 sandbox="$(mktemp -d /tmp/pa-test-XXXXXX)"
 trap 'rm -rf "$sandbox"' EXIT
 # Session dirs are NOT pinned: they derive from the sandboxed agent dir, and tests set their own.
-# Kernel venv: NOT passed through (AC3: tests must not read the invoking user's kernel venv).
-# Live-kernel e2e lanes skip when the sandbox has no kernel python; set PA_E2E_KERNEL_PYTHON
-# explicitly to run them against a python you provisioned for tests.
+# Kernel venv: the live-kernel e2e lanes need a kernel python. Use the ISOLATED test user's venv
+# (this runner refuses user paperclip, so $real_home is pae2e's / the home PC's, never the live fleet's).
+# Read-only; tests never write it. An explicit PA_E2E_KERNEL_PYTHON wins.
+if [ -z "${PA_E2E_KERNEL_PYTHON:-}" ] && [ -n "$real_home" ] && [ -x "$real_home/.prime/agent/kernel-venv/bin/python" ]; then
+  export PA_E2E_KERNEL_PYTHON="$real_home/.prime/agent/kernel-venv/bin/python"
+fi
 unset PRIME_AGENT_SESSION_DIR PRIME_AGENT_CODING_AGENT_SESSION_DIR PRIME_AGENT_CODING_AGENT_DIR PRIME_AGENT_KERNEL_VENV
 export HOME="$sandbox/home" \
   PRIME_AGENT_PLATFORM_SOCKET_DIR="$sandbox/s" TMPDIR="$sandbox/t" \
