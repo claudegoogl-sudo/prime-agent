@@ -147,11 +147,19 @@ mod tests {
             .unwrap();
         assert!(output.status.success());
         let uid = String::from_utf8(output.stdout).unwrap();
+        let _l = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("PRIME_AGENT_PLATFORM_SOCKET_DIR");
+        std::env::remove_var("PRIME_AGENT_PLATFORM_SOCKET_DIR");
+        // Linux default is /tmp (W2); elsewhere TMPDIR.
+        #[cfg(target_os = "linux")]
+        let tmp = PathBuf::from("/tmp");
+        #[cfg(not(target_os = "linux"))]
         let tmp = std::env::var_os("TMPDIR").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
-        assert_eq!(
-            socket_dir(),
-            socket_dir_for(&tmp, uid.trim().parse().unwrap())
-        );
+        let got = socket_dir();
+        if let Some(v) = saved {
+            std::env::set_var("PRIME_AGENT_PLATFORM_SOCKET_DIR", v);
+        }
+        assert_eq!(got, socket_dir_for(&tmp, uid.trim().parse().unwrap()));
     }
 
     #[cfg(all(unix, not(target_os = "linux")))]

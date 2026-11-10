@@ -17,13 +17,11 @@ trap 'rm -rf "$sandbox"' EXIT
 export HOME="$sandbox/home" PRIME_AGENT_CODING_AGENT_DIR="$sandbox/agent" \
   PRIME_AGENT_KERNEL_VENV="$sandbox/venv" PRIME_AGENT_SESSION_DIR="$sandbox/sessions" \
   PRIME_AGENT_CODING_AGENT_SESSION_DIR="$sandbox/sessions" \
-  TMPDIR="$sandbox/t" \
+  PRIME_AGENT_PLATFORM_SOCKET_DIR="$sandbox/s" TMPDIR="$sandbox/t" \
   XDG_CONFIG_HOME="$sandbox/xdg-config" XDG_DATA_HOME="$sandbox/xdg-data" XDG_RUNTIME_DIR="$sandbox/xdg-run"
-# Socket dir is NOT pinned by env: the default derives from TMPDIR (inside the sandbox, short path for SUN_LEN).
-unset PRIME_AGENT_PLATFORM_SOCKET_DIR
-mkdir -p "$HOME" "$TMPDIR"
+mkdir -p "$HOME" "$TMPDIR" "$sandbox/s"
 # Guard: abort if any resolved path is under the real HOME.
-for v in HOME PRIME_AGENT_CODING_AGENT_DIR PRIME_AGENT_KERNEL_VENV PRIME_AGENT_SESSION_DIR TMPDIR; do
+for v in HOME PRIME_AGENT_CODING_AGENT_DIR PRIME_AGENT_KERNEL_VENV PRIME_AGENT_SESSION_DIR PRIME_AGENT_PLATFORM_SOCKET_DIR TMPDIR; do
   val="${!v}"
   if [ -n "$real_home" ] && [ "$real_home" != "/" ]; then
     case "$val/" in "$real_home"/*) echo "hermetic-runner: $v=$val is under the real HOME; abort" >&2; exit 98 ;; esac

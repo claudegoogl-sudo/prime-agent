@@ -356,6 +356,11 @@ impl Supervisor {
                 }
             });
         }
+        if let Some(parent) = self.options.socket_path.parent() {
+            crate::paths::ensure_dir(parent)?;
+            // PLA-12418 AC2: the daemon's own socket dir must not hold another generation's sockets/locks.
+            crate::platform::assert_own_generation(parent)?;
+        }
         socket::prepare_socket_path(&self.options.socket_path).await?;
         let listener = bind_transport(&self.options.socket_path)
             .await
