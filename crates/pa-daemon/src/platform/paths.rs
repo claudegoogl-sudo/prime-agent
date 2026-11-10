@@ -262,6 +262,9 @@ mod platform_patch_10_tests {
         std::env::set_var("PRIME_AGENT_PLATFORM_SOCKET_DIR", &pinned);
         assert_eq!(socket_dir(), pinned);
         std::env::remove_var("PRIME_AGENT_PLATFORM_SOCKET_DIR");
+        #[cfg(target_os = "linux")]
+        assert!(socket_dir().starts_with("/tmp"), "linux default ignores TMPDIR (W2)");
+        #[cfg(not(target_os = "linux"))]
         assert!(socket_dir().starts_with(&other));
     }
 }
