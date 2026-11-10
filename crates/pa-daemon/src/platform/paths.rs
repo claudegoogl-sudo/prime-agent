@@ -29,9 +29,9 @@ pub fn assert_own_generation(dir: &Path) -> anyhow::Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => anyhow::bail!("socket dir marker unreadable: {e}"),
     }
-    let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    let node_style = name.starts_with("prime-agent-") && !name.starts_with("prime-agent-rs-");
-    if node_style {
+    // Any unmarked dir that already holds sockets/locks is foreign, whatever
+    // its name (explicit PRIME_AGENT_PLATFORM_SOCKET_DIR included).
+    {
         let foreign = std::fs::read_dir(dir)?.flatten().any(|e| {
             let n = e.file_name();
             let n = n.to_string_lossy();
@@ -39,12 +39,13 @@ pub fn assert_own_generation(dir: &Path) -> anyhow::Result<()> {
         });
         if foreign {
             anyhow::bail!(
-                "socket dir {} holds sockets/locks of another product generation (Node); refusing to start. Use the Rust default dir or PRIME_AGENT_PLATFORM_SOCKET_DIR",
+                "socket dir {} holds sockets/locks of another product generation (unmarked); refusing to start. Use an empty dir, the Rust default dir or PRIME_AGENT_PLATFORM_SOCKET_DIR",
                 dir.display()
             );
         }
     }
     std::fs::write(&marker, GENERATION)?;
+    eprintln!("pa-daemon: socket dir {} (generation marker stamped)", dir.display());
     Ok(())
 }
 
@@ -252,6 +253,10 @@ mod generation_tests {
         std::fs::create_dir(&foreign).unwrap();
         std::fs::write(foreign.join(GENERATION_MARKER), "node").unwrap();
         assert!(assert_own_generation(&foreign).is_err());
+        let odd = t.path().join("custom-dir");
+        std::fs::create_dir(&odd).unwrap();
+        std::fs::write(odd.join("daemon.lock"), "").unwrap();
+        assert!(assert_own_generation(&odd).is_err());
         let own = t.path().join("prime-agent-rs-1000");
         std::fs::create_dir(&own).unwrap();
         assert!(assert_own_generation(&own).is_ok());
