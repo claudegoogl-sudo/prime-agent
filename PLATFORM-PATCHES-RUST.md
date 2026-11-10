@@ -32,3 +32,6 @@ UNCONFIRMED values: contextWindow, maxTokens and cost are copied from the Haiku 
 - F1: every session-file write (rewrite `atomic_write`, append `append_cached`, repair rewrite, info-cache sidecar) now goes through `pa_types::redact` (fail closed). Test: `session::manager::tests::persisted_session_file_holds_no_needle_encoding`.
 - F2: `PRIME_AGENT_PLATFORM_NEEDLES_FILE` empty/whitespace = unset. A bad file fails closed with a stderr line naming the path and reason.
 - F3 (install note): an old 0.9.3 TypeScript daemon can own `/tmp/prime-agent-<uid>/daemon.sock`. Starting the Rust CLI without the wrapper then times out ("Run: prime-agent shutdown --force"). Always start via the wrapper, which pins its own socket.
+
+## models.json: claude-fable-5-2 cost — UNCONFIRMED (PLA-12408)
+Cost values of `claude-fable-5-2` are copied from fable-5. No upstream catalog or provider price source found. Cost only affects usage reporting.
