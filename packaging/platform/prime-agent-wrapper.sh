@@ -3,6 +3,14 @@
 # keep the default. Pins registry dir, daemon socket and worker-socket dir so
 # a stale system daemon and an inherited TMPDIR are never used.
 set -euo pipefail
+# PLATFORM-PATCH 13 (PLA-12397): package dir = dist root (runtime + models.json live here), so a FRESH agent dir boots the kernel.
+HERE_PA="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+export PI_PACKAGE_DIR="${PI_PACKAGE_DIR:-$HERE_PA}"
+# Seed models.json (claude-haiku-5-5, claude-fable-5-2) when the agent dir has none.
+PA_AGENT_DIR="${PRIME_AGENT_CODING_AGENT_DIR:-$HOME/.prime/agent}"
+if [ -f "$HERE_PA/models.json" ] && [ ! -e "$PA_AGENT_DIR/models.json" ]; then
+  mkdir -p "$PA_AGENT_DIR" && cp "$HERE_PA/models.json" "$PA_AGENT_DIR/models.json"
+fi
 PA_ROOT="${PA_ROOT:-$HOME/work/prime-agent-rust}"
 mkdir -p "$PA_ROOT/supervisor" "$PA_ROOT/sock"
 chmod 700 "$PA_ROOT/supervisor" "$PA_ROOT/sock"

@@ -14,6 +14,10 @@ pub fn socket_dir() -> PathBuf {
         return PathBuf::from(pinned);
     }
     let uid = pa_core::platform::process::current_user_id();
+    // W2 (PLA-12188): default is /tmp, never an inherited TMPDIR (binary default, not wrapper-only).
+    #[cfg(target_os = "linux")]
+    let tmp = PathBuf::from("/tmp");
+    #[cfg(not(target_os = "linux"))]
     let tmp = std::env::var_os("TMPDIR").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
     socket_dir_for(&tmp, uid)
 }

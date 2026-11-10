@@ -584,8 +584,17 @@ impl ReplKernelManager {
         // PLATFORM-PATCH 12: opt-in hard abort at the existing cell budget.
         let hard = platform_hard_cell_timeout(
             opts.cell_timeout_ms,
-            std::env::var("PRIME_AGENT_PLATFORM_HARD_CELL_ABORT").ok().as_deref(),
-            std::env::var("PRIME_AGENT_PLATFORM_HARD_CELL_ABORT_MS").ok().as_deref(),
+            // W2 (PLA-12188): fleet default is ON (3000 s) in the binary; "0" disables.
+            Some(
+                std::env::var("PRIME_AGENT_PLATFORM_HARD_CELL_ABORT")
+                    .unwrap_or_else(|_| "1".to_string()),
+            )
+            .as_deref(),
+            Some(
+                std::env::var("PRIME_AGENT_PLATFORM_HARD_CELL_ABORT_MS")
+                    .unwrap_or_else(|_| "3000000".to_string()),
+            )
+            .as_deref(),
         );
         let user_signal = opts.signal.clone();
         let mut result = self.execute_bounded(code, opts, hard).await?;

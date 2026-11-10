@@ -32,7 +32,7 @@ pub const API_ANTHROPIC_MESSAGES: &str = "anthropic-messages";
 /// Claude Code version mimicked in OAuth mode. The API gates newer models on the claimed client
 /// version (e.g. claude-opus-5.5 requires >= 2.280), so keep this at or above the latest released
 /// Claude Code.
-const CLAUDE_CODE_VERSION: &str = "2.1.281";
+const CLAUDE_CODE_VERSION: &str = "2.1.290";
 const FINE_GRAINED_TOOL_STREAMING_BETA: &str = "fine-grained-tool-streaming-2025-05-14";
 const INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
 
