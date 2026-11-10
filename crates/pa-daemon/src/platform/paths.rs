@@ -6,6 +6,48 @@ use std::path::{Path, PathBuf};
 
 use crate::paths::hash_key;
 
+/// Marker file naming the product generation that owns a socket dir.
+#[cfg(unix)]
+pub const GENERATION_MARKER: &str = ".pa-generation";
+#[cfg(unix)]
+const GENERATION: &str = "rust";
+
+/// Refuse a socket dir that holds another product generation's sockets or
+/// locks (PLA-12418): a foreign marker, or a Node-style `prime-agent-<uid>`
+/// dir with `.sock`/`.lock` entries and no Rust marker. Stamps the marker
+/// on first use. Never deletes anything.
+#[cfg(unix)]
+pub fn assert_own_generation(dir: &Path) -> anyhow::Result<()> {
+    let marker = dir.join(GENERATION_MARKER);
+    match std::fs::read_to_string(&marker) {
+        Ok(found) if found.trim() == GENERATION => return Ok(()),
+        Ok(found) => anyhow::bail!(
+            "socket dir {} belongs to another product generation ({:?}); refusing to start",
+            dir.display(),
+            found.trim()
+        ),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => anyhow::bail!("socket dir marker unreadable: {e}"),
+    }
+    let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let node_style = name.starts_with("prime-agent-") && !name.starts_with("prime-agent-rs-");
+    if node_style {
+        let foreign = std::fs::read_dir(dir)?.flatten().any(|e| {
+            let n = e.file_name();
+            let n = n.to_string_lossy();
+            n.ends_with(".sock") || n.ends_with(".lock")
+        });
+        if foreign {
+            anyhow::bail!(
+                "socket dir {} holds sockets/locks of another product generation (Node); refusing to start. Use the Rust default dir or PRIME_AGENT_PLATFORM_SOCKET_DIR",
+                dir.display()
+            );
+        }
+    }
+    std::fs::write(&marker, GENERATION)?;
+    Ok(())
+}
+
 /// Default directory holding daemon socket files (Unix).
 #[cfg(unix)]
 pub fn socket_dir() -> PathBuf {
@@ -26,7 +68,9 @@ pub fn socket_dir() -> PathBuf {
 /// can re-anchor deep paths through /proc; other Unix platforms need a short path.
 #[cfg(unix)]
 fn socket_dir_for(tmp: &Path, uid: u32) -> PathBuf {
-    let name = format!("prime-agent-{uid}");
+    // Distinct from the TS/Node product's `prime-agent-<uid>` so the two
+    // generations never share sockets or lock dirs (PLA-12418).
+    let name = format!("prime-agent-rs-{uid}");
     let dir = tmp.join(&name);
     #[cfg(not(target_os = "linux"))]
     if std::os::unix::net::SocketAddr::from_pathname(
@@ -95,7 +139,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn default_socket_uses_the_same_real_uid_as_the_typescript_daemon() {
+    fn default_socket_uses_the_real_uid_in_a_rust_only_dir() {
         let output = std::process::Command::new("id")
             .arg("-ru")
             .output()
@@ -120,9 +164,9 @@ mod tests {
             let worker = dir.join("worker-000000000000-000000000000.sock");
             assert!(SocketAddr::from_pathname(&worker).is_ok());
             if length >= 65 {
-                assert_eq!(dir, Path::new("/tmp/prime-agent-501"));
+                assert_eq!(dir, Path::new("/tmp/prime-agent-rs-501"));
             } else {
-                assert_eq!(dir, tmp.join("prime-agent-501"));
+                assert_eq!(dir, tmp.join("prime-agent-rs-501"));
             }
         }
     }
@@ -132,7 +176,7 @@ mod tests {
     fn short_tmpdir_keeps_the_original_socket_directory() {
         assert_eq!(
             socket_dir_for(Path::new("/tmp"), 501),
-            Path::new("/tmp/prime-agent-501")
+            Path::new("/tmp/prime-agent-rs-501")
         );
     }
 
@@ -183,5 +227,34 @@ mod platform_patch_10_tests {
         assert_eq!(socket_dir(), PathBuf::from("/tmp/pa-pinned-test"));
         std::env::remove_var("PRIME_AGENT_PLATFORM_SOCKET_DIR");
         assert!(socket_dir().starts_with("/var/tmp/other-run"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod generation_tests {
+    use super::*;
+
+    #[test]
+    fn default_dir_is_distinct_from_node() {
+        std::env::remove_var("PRIME_AGENT_PLATFORM_SOCKET_DIR");
+        let n = socket_dir().file_name().unwrap().to_string_lossy().into_owned();
+        assert!(n.starts_with("prime-agent-rs-"), "{n}");
+    }
+
+    #[test]
+    fn refuses_node_dir_and_foreign_marker_but_stamps_empty() {
+        let t = tempfile::tempdir().unwrap();
+        let node = t.path().join("prime-agent-1000");
+        std::fs::create_dir(&node).unwrap();
+        std::fs::write(node.join("daemon.sock"), "").unwrap();
+        assert!(assert_own_generation(&node).is_err());
+        let foreign = t.path().join("x");
+        std::fs::create_dir(&foreign).unwrap();
+        std::fs::write(foreign.join(GENERATION_MARKER), "node").unwrap();
+        assert!(assert_own_generation(&foreign).is_err());
+        let own = t.path().join("prime-agent-rs-1000");
+        std::fs::create_dir(&own).unwrap();
+        assert!(assert_own_generation(&own).is_ok());
+        assert!(assert_own_generation(&own).is_ok());
     }
 }

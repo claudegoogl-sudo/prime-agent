@@ -72,6 +72,7 @@ async fn acquire_cleanup_lock(path: &Path) -> Result<pa_core::platform::LockDir>
 pub async fn prepare_socket_path(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         crate::paths::ensure_dir(parent)?;
+        crate::platform::assert_own_generation(parent)?;
     }
     // lstat, not `Path::exists()`: a dangling symlink still blocks `bind`
     // while `exists()` (which follows links) denies it.

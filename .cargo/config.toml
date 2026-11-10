@@ -3,3 +3,7 @@
 # already set, so a test that needs it can still set its own value.
 [env]
 DO_NOT_TRACK = "1"
+
+# PLA-12418: hermetic test runner (own HOME/agent dir/venv/socket dir per test binary).
+[target.'cfg(all())']
+runner = "scripts/hermetic-test-runner.sh"
