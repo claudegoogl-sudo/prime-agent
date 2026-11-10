@@ -102,11 +102,19 @@ mod tests {
             .unwrap();
         assert!(output.status.success());
         let uid = String::from_utf8(output.stdout).unwrap();
+        // W2 (PLA-12188): on Linux the default ignores TMPDIR.
+        #[cfg(target_os = "linux")]
+        let tmp = PathBuf::from("/tmp");
+        #[cfg(not(target_os = "linux"))]
         let tmp = std::env::var_os("TMPDIR").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
-        assert_eq!(
-            socket_dir(),
-            socket_dir_for(&tmp, uid.trim().parse().unwrap())
-        );
+        let expected = socket_dir_for(&tmp, uid.trim().parse().unwrap());
+        #[cfg(target_os = "linux")]
+        assert_eq!(expected, Path::new("/tmp").join(format!("prime-agent-{}", uid.trim())));
+        // Under `pa-job` (and any run that pins the dir) socket_dir() is the pin: only compare
+        // the default when no pin is set. Pure path computation, no daemon is started.
+        if std::env::var_os("PRIME_AGENT_PLATFORM_SOCKET_DIR").is_none() {
+            assert_eq!(socket_dir(), expected);
+        }
     }
 
     #[cfg(all(unix, not(target_os = "linux")))]
@@ -178,10 +186,17 @@ mod platform_patch_10_tests {
     // Single test: env is process-global, so keep all cases in one fn.
     #[test]
     fn pinned_socket_dir_ignores_tmpdir() {
+        // Restore the caller's pin afterwards (pa-job pins every job to a scratch dir).
+        let saved = std::env::var_os("PRIME_AGENT_PLATFORM_SOCKET_DIR");
         std::env::set_var("TMPDIR", "/var/tmp/other-run");
         std::env::set_var("PRIME_AGENT_PLATFORM_SOCKET_DIR", "/tmp/pa-pinned-test");
         assert_eq!(socket_dir(), PathBuf::from("/tmp/pa-pinned-test"));
-        std::env::remove_var("PRIME_AGENT_PLATFORM_SOCKET_DIR");
-        assert!(socket_dir().starts_with("/var/tmp/other-run"));
+        // Default (no pin) ignores TMPDIR on Linux: pure computation, no daemon.
+        #[cfg(target_os = "linux")]
+        assert!(socket_dir_for(Path::new("/tmp"), 1001).starts_with("/tmp"));
+        match saved {
+            Some(v) => std::env::set_var("PRIME_AGENT_PLATFORM_SOCKET_DIR", v),
+            None => std::env::remove_var("PRIME_AGENT_PLATFORM_SOCKET_DIR"),
+        }
     }
 }

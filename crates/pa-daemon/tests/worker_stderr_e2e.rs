@@ -249,6 +249,8 @@ fn never_ready_worker_failure_carries_the_captured_stderr_tail() {
     let _daemon = DaemonBuilder::new(&socket, &agent_dir)
         .env("PA_DAEMON_WORKER_CONNECT_TIMEOUT_MS", "2000")
         .env("TMPDIR", &tmpdir_file)
+        // PLATFORM-PATCH 10: the socket dir ignores TMPDIR on Linux; pin it at the plain file.
+        .env("PRIME_AGENT_PLATFORM_SOCKET_DIR", &tmpdir_file)
         .spawn(&socket);
 
     let script_path = write_script(dir.path(), &["never reached"]);

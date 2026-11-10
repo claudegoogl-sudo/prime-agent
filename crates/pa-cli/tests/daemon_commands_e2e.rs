@@ -248,7 +248,8 @@ fn run_cli(binary: &Path, dir: &Path, agent_dir: &Path, args: &[&str]) -> Output
         .args(args)
         .current_dir(dir)
         .env("PRIME_AGENT_CODING_AGENT_DIR", agent_dir)
-        .env("TMPDIR", dir);
+        .env("TMPDIR", dir)
+        .env("PRIME_AGENT_PLATFORM_SOCKET_DIR", dir.join("sockets"));
     for key in SCRUB_ENV {
         command.env_remove(key);
     }
@@ -800,6 +801,8 @@ fn ts_daemon_differential_cli_output() {
     .expect("fixture model settings");
     // `schedule` cannot take --daemon-socket (TS parity); the daemon uses the default path.
     std::env::set_var("TMPDIR", dir.path());
+    // PLATFORM-PATCH 10: the socket dir ignores TMPDIR; pin it into the scratch dir.
+    std::env::set_var("PRIME_AGENT_PLATFORM_SOCKET_DIR", dir.path().join("sockets"));
     let socket = pa_daemon::socket::default_daemon_socket_path();
     // The TS daemon does not create the socket's parent on bind (the Rust
     // supervisor does), so the parent must exist first.
@@ -815,6 +818,7 @@ fn ts_daemon_differential_cli_output() {
         .current_dir(&work)
         .env("PRIME_AGENT_CODING_AGENT_DIR", &agent_dir)
         .env("TMPDIR", dir.path())
+        .env("PRIME_AGENT_PLATFORM_SOCKET_DIR", dir.path().join("sockets"))
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     for key in SCRUB_ENV {
