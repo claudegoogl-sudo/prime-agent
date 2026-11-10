@@ -16,17 +16,18 @@ sandbox="$(mktemp -d /tmp/pa-test-XXXXXX)"
 trap 'rm -rf "$sandbox"' EXIT
 # Session dirs are NOT pinned: they derive from the sandboxed agent dir, and tests set their own.
 # The e2e lanes need a kernel python. Use the invoker's (read-only) when no explicit one is given.
-unset PRIME_AGENT_SESSION_DIR PRIME_AGENT_CODING_AGENT_SESSION_DIR
+# Agent dir + kernel venv derive from the sandboxed HOME too (tests set HOME and expect $HOME/.prime/agent);
+# an inherited override would point at the invoker, so unset them.
+unset PRIME_AGENT_SESSION_DIR PRIME_AGENT_CODING_AGENT_SESSION_DIR PRIME_AGENT_CODING_AGENT_DIR PRIME_AGENT_KERNEL_VENV
 if [ -z "${PA_E2E_KERNEL_PYTHON:-}" ] && [ -n "$real_home" ] && [ -x "$real_home/.prime/agent/kernel-venv/bin/python" ]; then
   export PA_E2E_KERNEL_PYTHON="$real_home/.prime/agent/kernel-venv/bin/python"
 fi
-export HOME="$sandbox/home" PRIME_AGENT_CODING_AGENT_DIR="$sandbox/agent" \
-  PRIME_AGENT_KERNEL_VENV="$sandbox/venv" \
+export HOME="$sandbox/home" \
   PRIME_AGENT_PLATFORM_SOCKET_DIR="$sandbox/s" TMPDIR="$sandbox/t" \
   XDG_CONFIG_HOME="$sandbox/xdg-config" XDG_DATA_HOME="$sandbox/xdg-data" XDG_RUNTIME_DIR="$sandbox/xdg-run"
 mkdir -p "$HOME" "$TMPDIR" "$sandbox/s"
 # Guard: abort if any resolved path is under the real HOME.
-for v in HOME PRIME_AGENT_CODING_AGENT_DIR PRIME_AGENT_KERNEL_VENV PRIME_AGENT_PLATFORM_SOCKET_DIR TMPDIR; do
+for v in HOME PRIME_AGENT_PLATFORM_SOCKET_DIR TMPDIR; do
   val="${!v}"
   if [ -n "$real_home" ] && [ "$real_home" != "/" ]; then
     case "$val/" in "$real_home"/*) echo "hermetic-runner: $v=$val is under the real HOME; abort" >&2; exit 98 ;; esac
