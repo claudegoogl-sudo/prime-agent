@@ -217,17 +217,44 @@ mod tests {
 }
 
 #[cfg(all(test, unix))]
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(all(test, unix))]
 mod platform_patch_10_tests {
     use super::*;
 
-    // Single test: env is process-global, so keep all cases in one fn.
+    // Env is process-global: restore every variable on exit (even on panic)
+    // and keep every path inside a temp dir, so later tests of this binary
+    // never write outside the hermetic sandbox.
+    struct EnvGuard(Vec<(&'static str, Option<std::ffi::OsString>)>);
+    impl EnvGuard {
+        fn new(names: &[&'static str]) -> Self {
+            Self(names.iter().map(|n| (*n, std::env::var_os(n))).collect())
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (n, v) in &self.0 {
+                match v {
+                    Some(v) => std::env::set_var(n, v),
+                    None => std::env::remove_var(n),
+                }
+            }
+        }
+    }
+
     #[test]
     fn pinned_socket_dir_ignores_tmpdir() {
-        std::env::set_var("TMPDIR", "/var/tmp/other-run");
-        std::env::set_var("PRIME_AGENT_PLATFORM_SOCKET_DIR", "/tmp/pa-pinned-test");
-        assert_eq!(socket_dir(), PathBuf::from("/tmp/pa-pinned-test"));
+        let _l = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = EnvGuard::new(&["TMPDIR", "PRIME_AGENT_PLATFORM_SOCKET_DIR"]);
+        let t = tempfile::tempdir().unwrap();
+        let other = t.path().join("other-run");
+        let pinned = t.path().join("pinned");
+        std::env::set_var("TMPDIR", &other);
+        std::env::set_var("PRIME_AGENT_PLATFORM_SOCKET_DIR", &pinned);
+        assert_eq!(socket_dir(), pinned);
         std::env::remove_var("PRIME_AGENT_PLATFORM_SOCKET_DIR");
-        assert!(socket_dir().starts_with("/var/tmp/other-run"));
+        assert!(socket_dir().starts_with(&other));
     }
 }
 
@@ -237,8 +264,13 @@ mod generation_tests {
 
     #[test]
     fn default_dir_is_distinct_from_node() {
+        let _l = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("PRIME_AGENT_PLATFORM_SOCKET_DIR");
         std::env::remove_var("PRIME_AGENT_PLATFORM_SOCKET_DIR");
         let n = socket_dir().file_name().unwrap().to_string_lossy().into_owned();
+        if let Some(v) = saved {
+            std::env::set_var("PRIME_AGENT_PLATFORM_SOCKET_DIR", v);
+        }
         assert!(n.starts_with("prime-agent-rs-"), "{n}");
     }
 
