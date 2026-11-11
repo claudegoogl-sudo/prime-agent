@@ -18,6 +18,19 @@ const GENERATION: &str = "rust";
 /// on first use. Never deletes anything.
 #[cfg(unix)]
 pub fn assert_own_generation(dir: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+    // Hardening (PLA-12481): the dir lives under world-writable /tmp with a
+    // predictable name. Require a real dir (not a symlink), ours, mode 0700.
+    let meta = std::fs::symlink_metadata(dir)?;
+    if !meta.file_type().is_dir() {
+        anyhow::bail!("socket dir {} is not a real directory (symlink?); refusing to start", dir.display());
+    }
+    if meta.uid() != pa_core::platform::process::current_user_id() {
+        anyhow::bail!("socket dir {} is owned by another user; refusing to start", dir.display());
+    }
+    if meta.permissions().mode() & 0o777 != 0o700 {
+        anyhow::bail!("socket dir {} must have mode 0700; refusing to start", dir.display());
+    }
     let marker = dir.join(GENERATION_MARKER);
     match std::fs::read_to_string(&marker) {
         Ok(found) if found.trim() == GENERATION => return Ok(()),
@@ -44,7 +57,17 @@ pub fn assert_own_generation(dir: &Path) -> anyhow::Result<()> {
             );
         }
     }
-    std::fs::write(&marker, GENERATION)?;
+    {
+        use std::io::Write;
+        // O_CREAT|O_EXCL never follows a planted symlink; O_NOFOLLOW is belt and braces.
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(nix::fcntl::OFlag::O_NOFOLLOW.bits())
+            .open(&marker)?;
+        f.write_all(GENERATION.as_bytes())?;
+    }
     eprintln!("pa-daemon: socket dir {} (generation marker stamped)", dir.display());
     Ok(())
 }
@@ -304,5 +327,28 @@ mod generation_tests {
         std::fs::create_dir(&own).unwrap();
         assert!(assert_own_generation(&own).is_ok());
         assert!(assert_own_generation(&own).is_ok());
+    }
+
+    #[test]
+    fn refuses_symlinked_marker_symlinked_dir_and_bad_mode() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let t = tempfile::tempdir().unwrap();
+        let secret = t.path().join("victim");
+        std::fs::write(&secret, "keep").unwrap();
+        let d1 = t.path().join("d1");
+        std::fs::create_dir(&d1).unwrap();
+        std::fs::set_permissions(&d1, std::fs::Permissions::from_mode(0o700)).unwrap();
+        symlink(&secret, d1.join(GENERATION_MARKER)).unwrap();
+        assert!(assert_own_generation(&d1).is_err());
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "keep");
+        let real = t.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = t.path().join("link");
+        symlink(&real, &link).unwrap();
+        assert!(assert_own_generation(&link).is_err());
+        let open = t.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(assert_own_generation(&open).is_err());
     }
 }
