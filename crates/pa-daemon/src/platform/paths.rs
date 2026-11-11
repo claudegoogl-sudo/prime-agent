@@ -64,7 +64,7 @@ pub fn assert_own_generation(dir: &Path) -> anyhow::Result<()> {
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .custom_flags(nix::fcntl::OFlag::O_NOFOLLOW.bits())
+            .custom_flags(libc::O_NOFOLLOW)
             .open(&marker)?;
         f.write_all(GENERATION.as_bytes())?;
     }
