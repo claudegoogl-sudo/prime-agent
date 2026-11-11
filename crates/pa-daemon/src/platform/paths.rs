@@ -325,6 +325,10 @@ mod generation_tests {
         assert!(assert_own_generation(&odd).is_err());
         let own = t.path().join("prime-agent-rs-1000");
         std::fs::create_dir(&own).unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&own, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
         assert!(assert_own_generation(&own).is_ok());
         assert!(assert_own_generation(&own).is_ok());
     }
