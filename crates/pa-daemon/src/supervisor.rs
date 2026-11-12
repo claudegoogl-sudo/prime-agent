@@ -356,6 +356,15 @@ impl Supervisor {
                 }
             });
         }
+        if let Some(parent) = self.options.socket_path.parent() {
+            // PLA-12418 AC2: the platform socket dir (default or env-pinned) must not hold another
+            // generation's sockets/locks. An explicit --socket path elsewhere is the caller's own dir.
+            #[cfg(unix)]
+            if parent == crate::platform::socket_dir() {
+                crate::paths::ensure_dir(parent)?;
+                crate::platform::assert_own_generation(parent)?;
+            }
+        }
         socket::prepare_socket_path(&self.options.socket_path).await?;
         let listener = bind_transport(&self.options.socket_path)
             .await

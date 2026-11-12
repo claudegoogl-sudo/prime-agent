@@ -5,6 +5,9 @@
 
 mod paths;
 
+#[cfg(unix)]
+pub use paths::{assert_own_generation, GENERATION_MARKER};
+
 pub use paths::{
     default_daemon_socket_path, socket_dir, socket_identity, worker_socket_path, SocketIdentity,
 };
